@@ -1,5 +1,9 @@
 # Web Crawler Spider
 
+[![CI](https://github.com/mistrysiddh/web-crawler-spider/actions/workflows/ci.yml/badge.svg)](https://github.com/mistrysiddh/web-crawler-spider/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Hermes Desktop](https://img.shields.io/badge/Hermes_Desktop-%E2%89%A50.22-7c8cff)
+
 A Hermes Desktop plugin: an eight-legged spider that literally crawls the Hermes window. It walks between the
 real buttons, links and inputs, outlines the one it is standing on, and reacts to what the agent is doing.
 
