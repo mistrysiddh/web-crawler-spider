@@ -1,0 +1,7 @@
+name: web-crawler-spider
+version: 1.0.0
+description: A small spider that crawls the Hermes Desktop window and reacts to what the agent is doing (work web, risky-command spider-sense, helper spiders for subagents, flies, napping).
+license: MIT
+homepage: https://github.com/mistrysiddh/web-crawler-spider
+requires_hermes: ">=0.22.0"
+tags: [desktop, fun, spider]
