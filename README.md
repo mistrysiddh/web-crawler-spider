@@ -22,7 +22,8 @@ hermes plugins enable web-crawler-spider
 ```
 
 Or by hand: copy `desktop/plugin.js` to `~/.hermes/desktop-plugins/web-crawler-spider/plugin.js`. Hermes Desktop
-loads it within a few seconds. The 🕷 chip in the status bar pauses and resumes it.
+loads it within a few seconds. The first time, a small bubble points you to the 🕷 chip in the status bar: click it
+for the settings panel (sliders for size, speed and body, a switch for every feature, pause, nap, reset).
 
 ## What it does
 
@@ -59,7 +60,7 @@ between windows on/off, Cursor chase on/off, Take a nap, Wake up, Reset size, sp
 Demos (no real work needed): Show a helper spider, Show the work web, Test spider-sense, Show a visiting spider,
 Send my spider to visit another window, Chase my cursor now.
 
-Settings are saved in the plugin's own storage and survive restarts.
+Everything in the settings panel is also available from the palette. Settings are saved in the plugin's own storage and survive restarts.
 
 ## What it touches (disclosure)
 

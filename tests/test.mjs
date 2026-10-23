@@ -86,7 +86,7 @@ window.addEventListener = window.addEventListener.bind(window);
 // ---- load the plugin with the SDK/React imports stubbed ----
 let src = fs.readFileSync(PLUGIN, 'utf8')
   .replace(/^import .*$/gm, '')
-  .replace('export default WebCrawlerSpiderPlugin;', 'export { startSpider, CONFIG, WebCrawlerSpiderPlugin, moodNow, handleGatewayEvent };');
+  .replace('export default WebCrawlerSpiderPlugin;', 'export { startSpider, CONFIG, WebCrawlerSpiderPlugin, moodNow, handleGatewayEvent, togglePanel, closePanel, showHint };');
 src = "const PALETTE_AREA='palette', useRef=()=>({}), useEffect=()=>{}, useState=(v)=>[v,()=>{}], jsx=()=>null;\n" + src;
 const tmp = path.join(os.tmpdir(), `wcs-under-test-${process.pid}.mjs`);
 fs.writeFileSync(tmp, src);
@@ -548,6 +548,58 @@ void a1;
   mod.CONFIG.chase = 1;
   c.destroy();
   check('v21: destroy leaves no overlay behind', window.document.querySelectorAll('[data-wcs]').length === 0);
+}
+
+// ---- v1.1: settings panel and first-run hint ----
+{
+  const pstore = new Map();
+  mod.WebCrawlerSpiderPlugin.register({
+    storage: { get: (k) => pstore.get(k), set: (k, v) => pstore.set(k, v) },
+    register() {}, registerMany() {}, onEvent: () => () => {},
+  });
+  const chip = window.document.createElement('button');
+  chip.setAttribute('data-wcs', 'chip');
+  window.document.body.appendChild(chip);
+  rects.set(chip, { left: 1100, top: 770, width: 24, height: 20, right: 1124, bottom: 790, x: 1100, y: 770 });
+  const dbgNow = () => window.__webCrawlerSpider;
+
+  check('hint: shows once, over the chip', mod.showHint(chip) === true && !!window.document.querySelector('[data-wcs="hint"]'));
+  check('hint: remembered, never shown twice', mod.showHint(chip) === false && pstore.get('wcs:hint-seen') === true);
+  window.document.querySelector('[data-wcs="hint"]').click();
+  check('hint: a click dismisses it', !window.document.querySelector('[data-wcs="hint"]'));
+
+  check('panel: opens from the chip', mod.togglePanel(chip) === true && !!window.document.querySelector('[data-wcs="panel"]'));
+  const panel = window.document.querySelector('[data-wcs="panel"]');
+  check('panel: 3 sliders and 8 toggles', panel.querySelectorAll('input[type=range]').length === 3 && panel.querySelectorAll('input[type=checkbox]').length === 8);
+  check('panel: toggles show the current settings', [...panel.querySelectorAll('input[type=checkbox]')].every((b) => b.checked === !!mod.CONFIG[b.dataset.key]));
+
+  const flies = panel.querySelector('input[data-key=bugs]');
+  const before = mod.CONFIG.bugs;
+  flies.checked = !before;
+  flies.dispatchEvent(new window.Event('change'));
+  check('panel: a toggle changes the setting and saves it', mod.CONFIG.bugs === (before ? 0 : 1) && JSON.stringify(pstore.get('wcs:settings')).includes('"bugs":' + mod.CONFIG.bugs));
+  const size = panel.querySelector('input[data-key=size]');
+  size.value = '1.7';
+  size.dispatchEvent(new window.Event('change'));
+  check('panel: a slider changes the size and the spider restarts with it', mod.CONFIG.size === 1.7 && dbgNow() && window.document.querySelectorAll('[data-wcs=canvas],[data-wcs]').length >= 3);
+  panel.querySelector('button[data-act=pause]').click();
+  check('panel: pause button pauses the spider', dbgNow().isPaused() === true);
+  panel.querySelector('button[data-act=pause]').click();
+  check('panel: and resumes it', dbgNow().isPaused() === false);
+  window.document.body.dispatchEvent(new window.Event('pointerdown', { bubbles: true }));
+  check('panel: a click outside closes it', !window.document.querySelector('[data-wcs="panel"]'));
+  mod.togglePanel(chip);
+  window.document.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+  check('panel: Escape closes it', !window.document.querySelector('[data-wcs="panel"]'));
+  mod.togglePanel(chip);
+  window.document.querySelector('[data-wcs="panel"] button[data-act=reset]').click();
+  check('panel: reset restores the defaults and closes', mod.CONFIG.size === 1.2 && !window.document.querySelector('[data-wcs="panel"]'));
+  run(1);
+  check('panel: the spider never targets the panel', dbgNow()._debug().targets.length > 0 && dbgNow()._debug().targets.every((el) => !el.closest('[data-wcs]')));
+  dbgNow().destroy();
+  chip.remove();
+  rects.delete(chip);
+  check('panel: nothing left behind', window.document.querySelectorAll('[data-wcs]').length === 0);
 }
 
 // ---- register(): contributions must go through registerMany, each a plain object with id + area ----
