@@ -27,8 +27,11 @@ for the settings panel (sliders for size, speed and body, a switch for every fea
 
 ## What it does
 
-- **Crawls the UI.** Long arched legs, a small box body, a real tetrapod gait, and a thin silk line to the box it
-  is heading for. Colours follow your theme.
+- **Roams its own overlay.** Long arched legs, a small box body, a real tetrapod gait, and a thin silk line to the
+  spot it is heading for. Colours follow your theme. By default it reads nothing from the app.
+- **Explore mode (opt-in, off by default).** Turn on *Explore the app* in the settings panel and it walks to the
+  app's real buttons, links and inputs instead, boxing the one it stands on. This is the only mode that reads the
+  page (see the disclosure below).
 - **Work web.** While the agent works, a web grows in the corner, one strand per tool call. A finished run leaves
   dew on it, a failed run a torn web.
 
@@ -37,8 +40,8 @@ for the settings panel (sliders for size, speed and body, a switch for every fea
   green when its subagent succeeds (red when it fails) and walks off the edge.
 
   ![Helper spiders](docs/helpers.png)
-- **Attention.** When Hermes waits for approval the spider walks to the **Run** button and taps beside it. On an
-  error it goes to the error banner.
+- **Attention.** When Hermes waits for approval the spider turns amber and fidgets. With Explore on it also walks
+  to the **Run** button and taps beside it, and on an error it goes to the error banner.
 - **Spider-sense.** A risky command (`rm`, `sudo`, `git reset --hard`, `curl | sh`, …) in an approval request or
   tool call makes it freeze, stand tall with its front legs up and flash red with a "!".
 
@@ -57,7 +60,7 @@ for the settings panel (sliders for size, speed and body, a switch for every fea
 ## Commands (Ctrl+K → "Spider: …")
 
 Pause / resume, Bigger, Smaller, Faster, Slower, Bigger body, Smaller body, Silk guide line on/off, Flies on/off,
-Release a fly, Helper spiders on/off, Work web on/off, Attention + spider-sense on/off, Wind on/off, Visiting
+Release a fly, Helper spiders on/off, Work web on/off, Attention + spider-sense on/off, Wind on/off, Explore the app on/off, Visiting
 between windows on/off, Cursor chase on/off, Freeze in the background on/off, Take a nap, Wake up, Reset size, speed and extras.
 
 Demos (no real work needed): Show a helper spider, Show the work web, Test spider-sense, Show a visiting spider,
@@ -67,8 +70,11 @@ Everything in the settings panel is also available from the palette. Settings ar
 
 ## What it touches (disclosure)
 
-- **Reads the page** with `document.querySelectorAll`, `elementFromPoint` and `getComputedStyle` to find buttons,
-  links, inputs and alert banners, and the theme colour. Nothing is modified, clicked or hidden.
+- **By default it does not read the app's elements.** It reads only the theme: CSS variables and background colour
+  of the root and `<body>` via `getComputedStyle`. No `querySelectorAll`, no `elementFromPoint`, no button text.
+- **Only if you turn on Explore the app** (off by default) it reads the page with `document.querySelectorAll`,
+  `elementFromPoint` and `getComputedStyle` to find buttons, links, inputs and alert banners, and to find the
+  approval button by its label. Nothing is modified, clicked or hidden.
 - **Listens** (capture, passive) to pointer, keyboard, wheel and scroll events, and to window focus / visibility changes, only to react to them. Nothing is
   recorded or sent anywhere.
 - **Subscribes to Hermes gateway events** through `ctx.onEvent` (message, tool, approval, error and subagent
@@ -84,7 +90,7 @@ Everything in the settings panel is also available from the palette. Settings ar
 ## Develop
 
 `desktop/plugin.js` is a single ES module with no build step. The logic test runs the plugin in jsdom with a
-simulated clock (about 100 checks, a few minutes):
+simulated clock (about 150 checks, a few minutes):
 
 ```bash
 npm install

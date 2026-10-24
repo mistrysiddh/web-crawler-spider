@@ -12,7 +12,7 @@ import { jsx } from 'react/jsx-runtime';
  * whose README credits @rybinfx for the original "Web Crawlers" concept.
  */
 
-const VERSION = '1.2.0';
+const VERSION = '1.3.0';
 
 const CONFIG = {
   targetSelector:
@@ -29,13 +29,14 @@ const CONFIG = {
   helperScale: 0.5, // helper size relative to the big spider
   maxHelpers: 4, // helpers on screen at once; more subagents wait for a free slot
   helperStaleMs: 120000, // a subagent silent this long is assumed gone
+  explore: 0, // 1 = also walk to the app's buttons, links and approval prompts (reads the page); 0 = roam only its own overlay
   chase: 1, // 1 = now and then it dashes after the mouse cursor for a few seconds
   background: 1, // 1 = freeze (no timers, no frames) while the window is hidden, minimised or unfocused
   blurGraceMs: 4000, // an unfocused but visible window keeps going this long before freezing
   chaseEveryMs: 60000, // average gap between chases
   chaseMs: 5000, // how long a chase lasts
   web: 1, // 1 = a web grows in the corner while the agent works (a strand per tool call)
-  attention: 1, // 1 = the spider walks to the button that needs you, and senses risky commands
+  attention: 1, // 1 = it senses risky commands; with explore on it also walks to the button that needs you
   wind: 1, // 1 = scrolling or moving the window makes the silk sway and the spider cling
   peers: 1, // 1 = spiders in other Hermes windows visit each other
   visitEveryMs: 100000, // average gap between visits when another window is open
@@ -270,10 +271,12 @@ function resolveThemeColor(forced) {
     else if (/^\d+\s+\d+\s+\d+$/.test(v)) v = `rgb(${v})`;
     return v;
   }
-  const el = document.querySelector('a, button');
-  if (el) {
-    const c = getComputedStyle(el).color;
-    if (c) return c;
+  if (CONFIG.explore) {
+    const el = document.querySelector('a, button');
+    if (el) {
+      const c = getComputedStyle(el).color;
+      if (c) return c;
+    }
   }
   return '#00f0ff';
 }
@@ -461,7 +464,8 @@ function startSpider(ctx) {
   let targets = [];
   let history = [];
   function collectNow() {
-    targets = collectTargets(CONFIG.targetSelector, CONFIG.maxTargets);
+    // roaming mode reads nothing from the page: no targets, no scans
+    targets = CONFIG.explore ? collectTargets(CONFIG.targetSelector, CONFIG.maxTargets) : [];
   }
 
   const rescanInterval = setInterval(() => {
@@ -660,6 +664,21 @@ function startSpider(ctx) {
 
   // ---- main spider: choosing where to go ----
   function pickNext() {
+    if (!CONFIG.explore) {
+      // roam only its own overlay: a random spot inside the window, never an app element
+      const b = bounds(main);
+      const near = Math.random() < 0.7 ? 260 * size : Infinity;
+      const a = Math.random() * Math.PI * 2;
+      const r = Math.random() * (near === Infinity ? 0 : near);
+      const p = near === Infinity
+        ? { x: b.x0 + Math.random() * (b.x1 - b.x0), y: b.y0 + Math.random() * (b.y1 - b.y0) }
+        : clampTo(main, body.x + Math.cos(a) * r, body.y + Math.sin(a) * r);
+      state.currentEl = null;
+      state.target.x = p.x;
+      state.target.y = p.y;
+      state.mode = 'walk';
+      return;
+    }
     const pool = targets.filter((el) => el.isConnected && !history.includes(el) && el !== state.currentEl);
     const source = pool.length ? pool : targets;
     if (!source.length) return;
@@ -691,6 +710,10 @@ function startSpider(ctx) {
   let underEl = null;
   let probeTick = 0;
   function probeUnderBody() {
+    if (!CONFIG.explore) {
+      underEl = null;
+      return;
+    }
     const x = Math.min(Math.max(body.x, 0), window.innerWidth - 1);
     const y = Math.min(Math.max(body.y, 0), window.innerHeight - 1);
     const hit = document.elementFromPoint(x, y);
@@ -851,7 +874,7 @@ function startSpider(ctx) {
 
     // attention: stand beside the button or banner that needs you
     const needy = m.name === 'waiting' || m.name === 'error';
-    if (attTick++ % 20 === 0 || (attEl && !attEl.isConnected)) attEl = CONFIG.attention && needy ? findAttentionEl(m.name) : null;
+    if (attTick++ % 20 === 0 || (attEl && !attEl.isConnected)) attEl = CONFIG.explore && CONFIG.attention && needy ? findAttentionEl(m.name) : null;
     const attending = !!(attEl && attEl.isConnected && needy);
     if (attending && (st.mode === 'dwell' || st.mode === 'walk' || st.mode === 'attend')) {
       st.mode = 'attend';
@@ -1596,7 +1619,11 @@ function startSpider(ctx) {
   /** Straight silk line from the spider to the element it is walking toward. */
   function currentGuide() {
     const el = state.currentEl;
-    if (!CONFIG.trail || (state.mode !== 'walk' && state.mode !== 'attend') || state.scare > 0 || !el || !el.isConnected) return null;
+    if (!CONFIG.trail || (state.mode !== 'walk' && state.mode !== 'attend') || state.scare > 0) return null;
+    if (!el && state.mode === 'walk' && !CONFIG.explore) {
+      return { x0: body.x, y0: body.y - CONFIG.hipHeight * size * (1 - 0.5 * state.curl) + state.bob - state.hop, x1: state.target.x, y1: state.target.y };
+    }
+    if (!el || !el.isConnected) return null;
     const r = el.getBoundingClientRect();
     return {
       x0: body.x,
@@ -2013,8 +2040,9 @@ const SETTING_LIMITS = {
   peers: [0, 1],
   chase: [0, 1],
   background: [0, 1],
+  explore: [0, 1],
 };
-const DEFAULTS = { size: CONFIG.size, speed: CONFIG.speed, bodyScale: CONFIG.bodyScale, trail: CONFIG.trail, bugs: CONFIG.bugs, helpers: CONFIG.helpers, web: CONFIG.web, attention: CONFIG.attention, wind: CONFIG.wind, peers: CONFIG.peers, chase: CONFIG.chase, background: CONFIG.background };
+const DEFAULTS = { size: CONFIG.size, speed: CONFIG.speed, bodyScale: CONFIG.bodyScale, trail: CONFIG.trail, bugs: CONFIG.bugs, helpers: CONFIG.helpers, web: CONFIG.web, attention: CONFIG.attention, wind: CONFIG.wind, peers: CONFIG.peers, chase: CONFIG.chase, background: CONFIG.background, explore: CONFIG.explore };
 
 let chipSetPaused = null;
 let activeApi = null;
@@ -2108,7 +2136,8 @@ const PANEL_TOGGLES = [
   ['bugs', 'Flies to hunt'],
   ['helpers', 'Helper spiders for subagents'],
   ['web', 'Work web (grows with tool calls)'],
-  ['attention', 'Walk to Run / errors, sense risky commands'],
+  ['explore', 'Explore the app: walk to its buttons and links (reads the page)'],
+  ['attention', 'Spider-sense for risky commands (walks to Run if Explore is on)'],
   ['wind', 'Wind and shaking'],
   ['peers', 'Visit other Hermes windows'],
   ['chase', 'Chase the mouse cursor now and then'],
@@ -2319,6 +2348,7 @@ const WebCrawlerSpiderPlugin = {
       paletteCommand('guest-demo', 'Show a visiting spider (demo)', ['window', 'visit', 'friend', 'demo'], () => activeApi && activeApi.spawnGuest()),
       paletteCommand('visit', 'Send my spider to visit another window', ['window', 'visit', 'friend'], () => activeApi && activeApi.visitNow()),
       paletteCommand('chase', 'Cursor chase on / off', ['mouse', 'pointer', 'chase'], () => adjust('chase', 1, CONFIG.chase ? -1 : 1)),
+      paletteCommand('explore', 'Explore the app (walk to buttons) on / off', ['explore', 'walk', 'buttons', 'dom', 'page'], () => adjust('explore', 1, CONFIG.explore ? -1 : 1)),
       paletteCommand('background', 'Freeze in the background on / off', ['background', 'idle', 'cpu', 'battery', 'focus'], () => adjust('background', 1, CONFIG.background ? -1 : 1)),
       paletteCommand('chase-now', 'Chase my cursor now', ['mouse', 'pointer', 'chase'], () => activeApi && activeApi.chase()),
       paletteCommand('nap', 'Take a nap', ['sleep', 'rest'], () => activeApi && activeApi.nap()),

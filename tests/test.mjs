@@ -115,6 +115,8 @@ check('babies are off by default', mod.CONFIG.babies === 0);
 mod.CONFIG.babies = 2; // keep the (parked) baby code covered
 mod.CONFIG.bugs = 0; // no random flies during the long walk test
 mod.CONFIG.sleepAfterMs = 1e12; // no napping during the long walk test
+check('explore (reading the page) is off by default', mod.CONFIG.explore === 0);
+mod.CONFIG.explore = 1; // the walk-the-app tests below need it on; a block further down covers the default
 const api = mod.startSpider({ storage });
 check('overlay canvas + highlight added (data-wcs)', window.document.querySelectorAll('[data-wcs]').length === 2);
 check('starts unpaused (no reduced motion, nothing stored)', api.isPaused() === false);
@@ -584,7 +586,7 @@ void a1;
 
   check('panel: opens from the chip', mod.togglePanel(chip) === true && !!window.document.querySelector('[data-wcs="panel"]'));
   const panel = window.document.querySelector('[data-wcs="panel"]');
-  check('panel: 3 sliders and 9 toggles', panel.querySelectorAll('input[type=range]').length === 3 && panel.querySelectorAll('input[type=checkbox]').length === 9);
+  check('panel: 3 sliders and 10 toggles', panel.querySelectorAll('input[type=range]').length === 3 && panel.querySelectorAll('input[type=checkbox]').length === 10);
   check('panel: toggles show the current settings', [...panel.querySelectorAll('input[type=checkbox]')].every((b) => b.checked === !!mod.CONFIG[b.dataset.key]));
 
   const flies = panel.querySelector('input[data-key=bugs]');
@@ -608,12 +610,97 @@ void a1;
   mod.togglePanel(chip);
   window.document.querySelector('[data-wcs="panel"] button[data-act=reset]').click();
   check('panel: reset restores the defaults and closes', mod.CONFIG.size === 1.2 && !window.document.querySelector('[data-wcs="panel"]'));
+  check('panel: reset turns explore back off', mod.CONFIG.explore === 0);
+  mod.CONFIG.explore = 1;
+  dbgNow().destroy();
+  mod.startSpider({ storage });
   run(1);
   check('panel: the spider never targets the panel', dbgNow()._debug().targets.length > 0 && dbgNow()._debug().targets.every((el) => !el.closest('[data-wcs]')));
   dbgNow().destroy();
   chip.remove();
   rects.delete(chip);
   check('panel: nothing left behind', window.document.querySelectorAll('[data-wcs]').length === 0);
+}
+
+// ---- default mode: the spider reads nothing from the app and roams only its own overlay ----
+{
+  if (window.__webCrawlerSpider) window.__webCrawlerSpider.destroy();
+  rafQueue.length = 0;
+  mod.CONFIG.explore = 0;
+  mod.CONFIG.bugs = 0;
+  mod.CONFIG.helpers = 1;
+  mod.CONFIG.sleepAfterMs = 1e12;
+  mod.CONFIG.chase = 0;
+  const doc = window.document;
+  const calls = [];
+  const own = (x) => typeof x === 'string' && x.includes('data-wcs');
+  const spies = {
+    querySelectorAll: doc.querySelectorAll.bind(doc),
+    querySelector: doc.querySelector.bind(doc),
+    elementFromPoint: doc.elementFromPoint,
+    getComputedStyle: window.getComputedStyle,
+  };
+  const gcs = (el, ...r) => {
+    if (el !== doc.documentElement && el !== doc.body && !(el.closest && el.closest('[data-wcs]'))) calls.push('getComputedStyle');
+    return spies.getComputedStyle.call(window, el, ...r);
+  };
+  doc.querySelectorAll = (sel, ...r) => (own(sel) || calls.push('querySelectorAll:' + sel), spies.querySelectorAll(sel, ...r));
+  doc.querySelector = (sel, ...r) => (own(sel) || calls.push('querySelector:' + sel), spies.querySelector(sel, ...r));
+  doc.elementFromPoint = (...a) => (calls.push('elementFromPoint'), spies.elementFromPoint(...a));
+  globalThis.getComputedStyle = gcs;
+  window.getComputedStyle = gcs;
+
+  const ev = (type, payload) => mod.handleGatewayEvent({ type, payload: payload || {} });
+  const sp = mod.startSpider({ storage: { get: () => undefined, set() {} } });
+  const d0 = sp._debug();
+  let travelled = 0;
+  let outside = false;
+  let last = { x: d0.body.x, y: d0.body.y };
+  const sample = () => {
+    const d = sp._debug();
+    travelled += Math.hypot(d.body.x - last.x, d.body.y - last.y);
+    last = { x: d.body.x, y: d.body.y };
+    const m = 46 * d.main.size;
+    if (d.body.x < m - 1 || d.body.x > W - m + 1 || d.body.y < 56 * d.main.size - 1 || d.body.y > H - m + 1) outside = true;
+  };
+  ev('message.start');
+  for (let i = 0; i < 60 * 40; i++) {
+    frame();
+    if (i % 30 === 0) sample();
+    if (i === 600) ev('tool.start');
+    if (i === 900) ev('subagent.start', { subagent_id: 'a1', goal: 'x' });
+  }
+  check('default mode: the spider roams on its own', travelled > 400, `travelled ${Math.round(travelled)} px`);
+  check('default mode: it stays inside the window', !outside);
+  check('default mode: no app elements are targeted', sp._debug().targets.length === 0 && sp._debug().state.currentEl === null);
+  check('default mode: the work web still follows tool events', sp._debug().web > 0);
+  check('default mode: a helper spider still follows subagent events', sp._debug().creatures.some((c) => c.role === 'helper'));
+
+  // approval: the mood and the freeze come from the gateway event, not from the page
+  ev('approval.request', { command: 'rm -rf /tmp/x', description: 'delete' });
+  run(3);
+  check('default mode: waiting for approval still changes its mood', mod.moodNow(performance.now()).name === 'waiting');
+  check('default mode: risky command still freezes it with spider-sense', sp._debug().danger.until > performance.now());
+  check('default mode: it does not go looking for the Run button', sp._debug().attEl === null && sp._debug().state.mode !== 'attend');
+  ev('approval.received');
+  run(5);
+  check('default mode: nothing in the app was read', calls.length === 0, calls.slice(0, 4).join(' | '));
+
+  // turning explore on walks the app again, and says so by reading it
+  sp.destroy();
+  mod.CONFIG.explore = 1;
+  const sp2 = mod.startSpider({ storage: { get: () => undefined, set() {} } });
+  run(5);
+  check('explore on: it scans the app for targets again', sp2._debug().targets.length > 0 && calls.some((c) => c.startsWith('querySelectorAll')));
+  sp2.destroy();
+
+  doc.querySelectorAll = spies.querySelectorAll;
+  doc.querySelector = spies.querySelector;
+  doc.elementFromPoint = spies.elementFromPoint;
+  globalThis.getComputedStyle = spies.getComputedStyle;
+  window.getComputedStyle = spies.getComputedStyle;
+  mod.CONFIG.chase = 1;
+  mod.CONFIG.explore = 1;
 }
 
 // ---- background throttling: a hidden / unfocused window does no work ----
