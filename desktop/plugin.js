@@ -12,7 +12,7 @@ import { jsx } from 'react/jsx-runtime';
  * whose README credits @rybinfx for the original "Web Crawlers" concept.
  */
 
-const VERSION = '1.1.0';
+const VERSION = '1.2.0';
 
 const CONFIG = {
   targetSelector:
@@ -30,6 +30,8 @@ const CONFIG = {
   maxHelpers: 4, // helpers on screen at once; more subagents wait for a free slot
   helperStaleMs: 120000, // a subagent silent this long is assumed gone
   chase: 1, // 1 = now and then it dashes after the mouse cursor for a few seconds
+  background: 1, // 1 = freeze (no timers, no frames) while the window is hidden, minimised or unfocused
+  blurGraceMs: 4000, // an unfocused but visible window keeps going this long before freezing
   chaseEveryMs: 60000, // average gap between chases
   chaseMs: 5000, // how long a chase lasts
   web: 1, // 1 = a web grows in the corner while the agent works (a strand per tool call)
@@ -463,7 +465,7 @@ function startSpider(ctx) {
   }
 
   const rescanInterval = setInterval(() => {
-    if (!paused) collectNow();
+    if (!paused && !suspended) collectNow();
   }, CONFIG.rescanMs);
   let scrollTimer = null;
   function onScroll() {
@@ -474,6 +476,7 @@ function startSpider(ctx) {
   window.addEventListener('resize', resize);
 
   const themeInterval = setInterval(() => {
+    if (suspended) return;
     themeColor = resolveThemeColor(CONFIG.accent);
     pal = isLightBackground() ? PALETTES.light : PALETTES.dark;
   }, CONFIG.themeReadMs);
@@ -482,6 +485,8 @@ function startSpider(ctx) {
     window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const stored = ctx && ctx.storage ? ctx.storage.get('wcs:paused') : undefined;
   let paused = stored !== undefined ? !!stored : !!prefersReducedMotion;
+  // suspended = the window is in the background; unlike `paused` it is automatic and never saved
+  let suspended = false;
 
   // ---- creatures: the big spider (index 0) and its babies ----
   const size = CONFIG.size;
@@ -1215,6 +1220,7 @@ function startSpider(ctx) {
     const d = ev && ev.data;
     if (!d || d.from === myId) return;
     const now = performance.now();
+    if (suspended && (d.t === 'hello' || d.t === 'visit')) return; // a frozen window takes no visitors
     if (d.t === 'hello') {
       peers.set(d.from, now);
       if (!d.reply) post({ t: 'hello', reply: true });
@@ -1234,7 +1240,9 @@ function startSpider(ctx) {
       chan = null;
     }
   }
-  const helloTimer = setInterval(() => post({ t: 'hello' }), 5000);
+  const helloTimer = setInterval(() => {
+    if (!suspended) post({ t: 'hello' });
+  }, 5000);
   post({ t: 'hello' });
 
   function updateGuest(c, now) {
@@ -1840,7 +1848,7 @@ function startSpider(ctx) {
   let webWasVisible = false;
 
   function loop(now) {
-    if (paused) return; // loop fully stops; resume() restarts it
+    if (paused || suspended) return; // loop fully stops; resume() / wakeUp() restarts it
     const frameDt = lastTime ? Math.min((now - lastTime) / 1000, 0.1) : STEP;
     lastTime = now;
     acc += frameDt;
@@ -1879,8 +1887,38 @@ function startSpider(ctx) {
     lastTime = 0;
     applyPausedVisual();
     if (ctx && ctx.storage) ctx.storage.set('wcs:paused', false);
-    rafId = requestAnimationFrame(loop);
+    if (!suspended) rafId = requestAnimationFrame(loop);
   }
+  // ---- background throttling: a window nobody is looking at does no work ----
+  function wantsSuspend() {
+    return !!CONFIG.background && (document.hidden || !document.hasFocus());
+  }
+  function suspend() {
+    if (suspended) return;
+    suspended = true;
+    cancelAnimationFrame(rafId);
+    post({ t: 'gone' });
+  }
+  function wakeUp() {
+    if (!suspended) return;
+    suspended = false;
+    lastTime = 0;
+    lastActivity = performance.now();
+    collectNow();
+    post({ t: 'hello' });
+    if (!paused) rafId = requestAnimationFrame(loop);
+  }
+  let blurTimer = null;
+  function checkVisibility() {
+    clearTimeout(blurTimer);
+    if (!wantsSuspend()) wakeUp();
+    else if (document.hidden) suspend();
+    else blurTimer = setTimeout(() => wantsSuspend() && suspend(), CONFIG.blurGraceMs);
+  }
+  document.addEventListener('visibilitychange', checkVisibility);
+  window.addEventListener('blur', checkVisibility);
+  window.addEventListener('focus', checkVisibility);
+
   function toggle() {
     if (paused) resume();
     else pause();
@@ -1895,6 +1933,10 @@ function startSpider(ctx) {
   }
   function destroy() {
     cancelAnimationFrame(rafId);
+    clearTimeout(blurTimer);
+    document.removeEventListener('visibilitychange', checkVisibility);
+    window.removeEventListener('blur', checkVisibility);
+    window.removeEventListener('focus', checkVisibility);
     clearInterval(rescanInterval);
     clearInterval(helloTimer);
     post({ t: 'gone' });
@@ -1937,6 +1979,8 @@ function startSpider(ctx) {
     },
     destroy,
     isPaused,
+    isSuspended: () => suspended,
+    checkVisibility,
     pausedChanged: null,
     _debug: () => ({ body, legs, state, targets, history, creatures, main, pointer, guide, bug, wind, shake, peers, attEl, run, danger, myId, web: webAlpha(performance.now()) }),
   };
@@ -1944,7 +1988,9 @@ function startSpider(ctx) {
 
   resize();
   applyPausedVisual();
-  if (!paused) rafId = requestAnimationFrame(loop);
+  if (wantsSuspend() && document.hidden) suspended = true;
+  if (!paused && !suspended) rafId = requestAnimationFrame(loop);
+  if (!document.hidden) checkVisibility();
 
   return api;
 }
@@ -1966,8 +2012,9 @@ const SETTING_LIMITS = {
   wind: [0, 1],
   peers: [0, 1],
   chase: [0, 1],
+  background: [0, 1],
 };
-const DEFAULTS = { size: CONFIG.size, speed: CONFIG.speed, bodyScale: CONFIG.bodyScale, trail: CONFIG.trail, bugs: CONFIG.bugs, helpers: CONFIG.helpers, web: CONFIG.web, attention: CONFIG.attention, wind: CONFIG.wind, peers: CONFIG.peers, chase: CONFIG.chase };
+const DEFAULTS = { size: CONFIG.size, speed: CONFIG.speed, bodyScale: CONFIG.bodyScale, trail: CONFIG.trail, bugs: CONFIG.bugs, helpers: CONFIG.helpers, web: CONFIG.web, attention: CONFIG.attention, wind: CONFIG.wind, peers: CONFIG.peers, chase: CONFIG.chase, background: CONFIG.background };
 
 let chipSetPaused = null;
 let activeApi = null;
@@ -2065,6 +2112,7 @@ const PANEL_TOGGLES = [
   ['wind', 'Wind and shaking'],
   ['peers', 'Visit other Hermes windows'],
   ['chase', 'Chase the mouse cursor now and then'],
+  ['background', 'Freeze while the window is in the background'],
 ];
 const HINT_KEY = 'wcs:hint-seen';
 let panelEl = null;
@@ -2271,6 +2319,7 @@ const WebCrawlerSpiderPlugin = {
       paletteCommand('guest-demo', 'Show a visiting spider (demo)', ['window', 'visit', 'friend', 'demo'], () => activeApi && activeApi.spawnGuest()),
       paletteCommand('visit', 'Send my spider to visit another window', ['window', 'visit', 'friend'], () => activeApi && activeApi.visitNow()),
       paletteCommand('chase', 'Cursor chase on / off', ['mouse', 'pointer', 'chase'], () => adjust('chase', 1, CONFIG.chase ? -1 : 1)),
+      paletteCommand('background', 'Freeze in the background on / off', ['background', 'idle', 'cpu', 'battery', 'focus'], () => adjust('background', 1, CONFIG.background ? -1 : 1)),
       paletteCommand('chase-now', 'Chase my cursor now', ['mouse', 'pointer', 'chase'], () => activeApi && activeApi.chase()),
       paletteCommand('nap', 'Take a nap', ['sleep', 'rest'], () => activeApi && activeApi.nap()),
       paletteCommand('wake', 'Wake up', ['sleep'], () => activeApi && activeApi.wake()),

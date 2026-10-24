@@ -49,13 +49,16 @@ for the settings panel (sliders for size, speed and body, a switch for every fea
   a few seconds.
 - **Wind.** Scrolling or moving the window sways the silk; moving the window makes the spider hug the ground.
 - **Visitors.** With two Hermes windows open, their spiders visit each other and wave.
+- **Light on the CPU.** When the window is hidden or minimised the spider freezes at once; if it just loses focus it
+  freezes after a few seconds. No animation frames, no DOM scanning, no timers doing work, until you come back.
+  Switch it off in the settings panel if you want it to keep going.
 - It always stays fully inside the window.
 
 ## Commands (Ctrl+K → "Spider: …")
 
 Pause / resume, Bigger, Smaller, Faster, Slower, Bigger body, Smaller body, Silk guide line on/off, Flies on/off,
 Release a fly, Helper spiders on/off, Work web on/off, Attention + spider-sense on/off, Wind on/off, Visiting
-between windows on/off, Cursor chase on/off, Take a nap, Wake up, Reset size, speed and extras.
+between windows on/off, Cursor chase on/off, Freeze in the background on/off, Take a nap, Wake up, Reset size, speed and extras.
 
 Demos (no real work needed): Show a helper spider, Show the work web, Test spider-sense, Show a visiting spider,
 Send my spider to visit another window, Chase my cursor now.
@@ -66,7 +69,7 @@ Everything in the settings panel is also available from the palette. Settings ar
 
 - **Reads the page** with `document.querySelectorAll`, `elementFromPoint` and `getComputedStyle` to find buttons,
   links, inputs and alert banners, and the theme colour. Nothing is modified, clicked or hidden.
-- **Listens** (capture, passive) to pointer, keyboard, wheel and scroll events only to react to them. Nothing is
+- **Listens** (capture, passive) to pointer, keyboard, wheel and scroll events, and to window focus / visibility changes, only to react to them. Nothing is
   recorded or sent anywhere.
 - **Subscribes to Hermes gateway events** through `ctx.onEvent` (message, tool, approval, error and subagent
   events) to pick moods and helpers. It reads event types and, to spot risky commands, the text of tool and

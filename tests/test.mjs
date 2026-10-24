@@ -83,6 +83,20 @@ globalThis.getComputedStyle = window.getComputedStyle.bind(window);
 globalThis.matchMedia = window.matchMedia = () => ({ matches: false });
 window.addEventListener = window.addEventListener.bind(window);
 
+// controllable window focus / visibility (jsdom: never focused, always visible)
+let winFocused = true;
+let docHidden = false;
+window.document.hasFocus = () => winFocused;
+Object.defineProperty(window.document, 'hidden', { get: () => docHidden, configurable: true });
+const setWindowState = ({ focused = winFocused, hidden = docHidden }) => {
+  const hiddenChanged = hidden !== docHidden;
+  const focusChanged = focused !== winFocused;
+  winFocused = focused;
+  docHidden = hidden;
+  if (hiddenChanged) window.document.dispatchEvent(new window.Event('visibilitychange'));
+  if (focusChanged) window.dispatchEvent(new window.Event(focused ? 'focus' : 'blur'));
+};
+
 // ---- load the plugin with the SDK/React imports stubbed ----
 let src = fs.readFileSync(PLUGIN, 'utf8')
   .replace(/^import .*$/gm, '')
@@ -570,7 +584,7 @@ void a1;
 
   check('panel: opens from the chip', mod.togglePanel(chip) === true && !!window.document.querySelector('[data-wcs="panel"]'));
   const panel = window.document.querySelector('[data-wcs="panel"]');
-  check('panel: 3 sliders and 8 toggles', panel.querySelectorAll('input[type=range]').length === 3 && panel.querySelectorAll('input[type=checkbox]').length === 8);
+  check('panel: 3 sliders and 9 toggles', panel.querySelectorAll('input[type=range]').length === 3 && panel.querySelectorAll('input[type=checkbox]').length === 9);
   check('panel: toggles show the current settings', [...panel.querySelectorAll('input[type=checkbox]')].every((b) => b.checked === !!mod.CONFIG[b.dataset.key]));
 
   const flies = panel.querySelector('input[data-key=bugs]');
@@ -600,6 +614,87 @@ void a1;
   chip.remove();
   rects.delete(chip);
   check('panel: nothing left behind', window.document.querySelectorAll('[data-wcs]').length === 0);
+}
+
+// ---- background throttling: a hidden / unfocused window does no work ----
+{
+  mod.CONFIG.blurGraceMs = 30;
+  if (window.__webCrawlerSpider) window.__webCrawlerSpider.destroy(); // earlier tests' spiders share the frame queue
+  api.destroy();
+  rafQueue.length = 0;
+  let rescans = 0;
+  const origQSA = window.document.querySelectorAll.bind(window.document);
+  const bg = mod.startSpider({ storage: { get: () => undefined, set() {} } });
+  run(1);
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  check('background: running while the window is focused', bg.isSuspended() === false && rafQueue.length > 0);
+
+  setWindowState({ hidden: true });
+  check('background: a hidden window suspends at once', bg.isSuspended() === true);
+  frame(); // the pending frame may still run once, then must not re-arm
+  frame();
+  check('background: no animation frame is re-queued while suspended', rafQueue.length === 0);
+  const posBefore = { x: bg._debug().body.x, y: bg._debug().body.y };
+  run(5);
+  check('background: the spider does not move while suspended', bg._debug().body.x === posBefore.x && bg._debug().body.y === posBefore.y);
+  window.document.querySelectorAll = (...a) => (rescans++, origQSA(...a));
+  await wait(1200); // real time: the 450 ms rescan timer fires twice
+  window.document.querySelectorAll = origQSA;
+  check('background: the DOM rescan timer does no scanning while suspended', rescans === 0, `scans=${rescans}`);
+
+  setWindowState({ hidden: false });
+  check('background: showing the window wakes it', bg.isSuspended() === false);
+  run(1);
+  check('background: and the animation loop runs again', rafQueue.length > 0 && bg._debug().body.x !== undefined);
+
+  setWindowState({ focused: false });
+  check('background: losing focus does not freeze it straight away', bg.isSuspended() === false);
+  await wait(120);
+  check('background: it freezes once the focus grace period passes', bg.isSuspended() === true);
+  setWindowState({ focused: true });
+  check('background: regaining focus wakes it', bg.isSuspended() === false);
+  run(1);
+
+  setWindowState({ focused: false });
+  setWindowState({ focused: true });
+  await wait(120);
+  check('background: a quick blur and refocus never freezes it', bg.isSuspended() === false);
+
+  // a user pause stays a pause across a suspend / wake
+  bg.pause();
+  frame(); // flush the frame that was already queued (the test's cancelAnimationFrame is a stub)
+  setWindowState({ hidden: true });
+  setWindowState({ hidden: false });
+  check('background: waking does not undo a manual pause', bg.isPaused() === true && rafQueue.length === 0);
+  bg.resume();
+  setWindowState({ hidden: true });
+  frame();
+  bg.resume();
+  check('background: resume while suspended stays frozen', rafQueue.length === 0);
+  setWindowState({ hidden: false });
+  run(1);
+  check('background: and runs when the window returns', bg.isSuspended() === false && rafQueue.length > 0);
+
+  // the setting turns it off
+  bg.destroy();
+  mod.CONFIG.background = 0;
+  const bg2 = mod.startSpider({ storage: { get: () => undefined, set() {} } });
+  setWindowState({ hidden: true });
+  check('background: with the setting off nothing is suspended', bg2.isSuspended() === false);
+  await wait(120);
+  setWindowState({ focused: false });
+  await wait(120);
+  check('background: not even when unfocused', bg2.isSuspended() === false);
+  setWindowState({ hidden: false, focused: true });
+  bg2.destroy();
+  mod.CONFIG.background = 1;
+  check('background: destroy leaves no listeners armed', (() => {
+    const b = mod.startSpider({ storage: { get: () => undefined, set() {} } });
+    b.destroy();
+    setWindowState({ hidden: true });
+    setWindowState({ hidden: false });
+    return window.document.querySelectorAll('[data-wcs]').length === 0;
+  })());
 }
 
 // ---- register(): contributions must go through registerMany, each a plain object with id + area ----
