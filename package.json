@@ -1,6 +1,6 @@
 {
   "name": "web-crawler-spider",
-  "version": "1.3.0",
+  "version": "1.3.1",
   "private": true,
   "description": "Test harness for the Web Crawler Spider Hermes Desktop plugin (the plugin itself is desktop/plugin.js and needs no build)",
   "license": "MIT",

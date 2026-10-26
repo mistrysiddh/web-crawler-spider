@@ -12,7 +12,7 @@ import { jsx } from 'react/jsx-runtime';
  * whose README credits @rybinfx for the original "Web Crawlers" concept.
  */
 
-const VERSION = '1.3.0';
+const VERSION = '1.3.1';
 
 const CONFIG = {
   targetSelector:
@@ -20,6 +20,7 @@ const CONFIG = {
   pixel: 1, // CSS pixels per art pixel: 1 = smooth/HiDPI, 3 = chunky pixel-art
   bodyScale: 0.6, // body size relative to the legs (smaller = tinier body)
   unit: 3, // movement scale (CSS px per speed unit); independent of the look
+  turnRate: 0.05, // fastest the body may turn, in radians per 60 Hz step (0.05 = about 170 degrees per second)
   size: 1.2, // spider size multiplier
   speed: 0.7, // art pixels per 60 Hz step (walking speed)
   accent: null, // force a colour, e.g. '#ff9f1c'; null = read from theme
@@ -756,8 +757,11 @@ function startSpider(ctx) {
     let diff = desired - c.body.angle;
     while (diff > Math.PI) diff -= 2 * Math.PI;
     while (diff < -Math.PI) diff += 2 * Math.PI;
-    const turnFactor = Math.max(0.25, Math.cos(diff));
-    c.body.angle += diff * 0.14;
+    // pivot, don't skid: a big heading error slows the body to a crawl, and the turn itself is rate-limited
+    // so the legs can keep up (an instant spin leaves every leg in the air and crossed over the body)
+    const turnFactor = Math.max(0.1, Math.cos(diff));
+    const maxTurn = CONFIG.turnRate * Math.min(2.5, paceMul);
+    c.body.angle += Math.max(-maxTurn, Math.min(maxTurn, diff * 0.14));
     // constant-speed walk along the heading (slower on sharp turns); speed is art
     // pixels per 60 Hz step, so it scales with CONFIG.unit
     const stepLen = Math.min(CONFIG.speed * CONFIG.unit * turnFactor * paceMul * c.speedMul, dist);

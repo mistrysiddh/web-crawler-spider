@@ -330,7 +330,7 @@ void a1;
   check('helpers wander and stay on screen', !hBad && moved > 100, `moved ${moved.toFixed(0)}`);
   ev('subagent.complete', { subagent_id: 'a', status: 'completed' });
   ev('subagent.complete', { subagent_id: 'b', status: 'failed' });
-  run(0.5);
+  run(0.1); // sooner than a helper standing near the edge could finish walking off
   const ca = helpers().find((c) => c.entry.id === 'a');
   const cb = helpers().find((c) => c.entry.id === 'b');
   check('finished helpers turn green (ok) / red (failed)', ca && cb && ca.tint === '#3ddc84' && cb.tint === '#ff4d4d');
@@ -620,6 +620,38 @@ void a1;
   chip.remove();
   rects.delete(chip);
   check('panel: nothing left behind', window.document.querySelectorAll('[data-wcs]').length === 0);
+}
+
+// ---- turning: the body pivots at a limited rate instead of snapping round ----
+{
+  if (window.__webCrawlerSpider) window.__webCrawlerSpider.destroy();
+  rafQueue.length = 0;
+  mod.CONFIG.bugs = 0; mod.CONFIG.helpers = 0; mod.CONFIG.chase = 0; mod.CONFIG.sleepAfterMs = 1e12; mod.CONFIG.explore = 0;
+  const tp = mod.startSpider({ storage: { get: () => undefined, set() {} } });
+  const t = () => tp._debug();
+  const norm = (a) => { while (a > Math.PI) a -= 2 * Math.PI; while (a < -Math.PI) a += 2 * Math.PI; return a; };
+  t().body.x = 900; t().body.y = 400; t().body.angle = Math.PI;
+  t().state.mode = 'walk'; t().state.target.x = 100; t().state.target.y = 400;
+  run(3);
+  t().state.mode = 'walk'; t().state.target.x = 1200; t().state.target.y = 400; // turn all the way round
+  let prev = t().body.angle;
+  let maxStep = 0;
+  let slowWhileBig = true;
+  let aligned = -1;
+  for (let i = 0; i < 60 * 4; i++) {
+    frame();
+    const a = t().body.angle;
+    maxStep = Math.max(maxStep, Math.abs(norm(a - prev)));
+    prev = a;
+    const err = Math.abs(norm(Math.atan2(t().state.target.y - t().body.y, t().state.target.x - t().body.x) - a));
+    if (err > 1.4 && t().state.speedNow > 0.5) slowWhileBig = false;
+    if (aligned < 0 && err < 0.05) aligned = i;
+  }
+  check('turning: the body never spins faster than turnRate', maxStep <= mod.CONFIG.turnRate + 1e-6, `max ${maxStep.toFixed(3)} rad/step, limit ${mod.CONFIG.turnRate}`);
+  check('turning: a full turn-around still completes in about a second or two', aligned > 30 && aligned < 60 * 2.5, `aligned after ${aligned} frames`);
+  check('turning: it pivots rather than skids while facing the wrong way', slowWhileBig);
+  tp.destroy();
+  mod.CONFIG.explore = 1;
 }
 
 // ---- default mode: the spider reads nothing from the app and roams only its own overlay ----
