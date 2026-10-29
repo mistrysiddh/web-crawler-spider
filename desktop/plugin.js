@@ -3,16 +3,19 @@ import { useRef, useEffect, useState } from 'react';
 import { jsx } from 'react/jsx-runtime';
 
 /**
- * Web Crawler Spider — takes "web crawler" literally. An 8-legged spider
- * walks the live screen, stepping between real interactive elements with
- * 2-bone IK, highlighting whatever it's standing on. Read-only: it never
+ * Web Crawler Spider — an 8-legged spider that lives on the Hermes window and
+ * reacts to what the agent is doing (work web, helper spiders, approval mood,
+ * spider-sense). By default it roams only its own overlay; the opt-in Explore
+ * mode also walks between real interactive elements with 2-bone IK. It never
  * mutates the page beyond the two overlay nodes it owns (data-wcs).
+ *
+ * THIS FILE IS BUILT from src/*.js by scripts/build.mjs. Edit the files in src/.
  *
  * IK/gait approach adapted from the MIT-licensed felixyu9722/WebCrawlerMY,
  * whose README credits @rybinfx for the original "Web Crawlers" concept.
  */
 
-const VERSION = '1.3.1';
+const VERSION = '1.4.0';
 
 const CONFIG = {
   targetSelector:
@@ -32,7 +35,14 @@ const CONFIG = {
   helperStaleMs: 120000, // a subagent silent this long is assumed gone
   explore: 0, // 1 = also walk to the app's buttons, links and approval prompts (reads the page); 0 = roam only its own overlay
   chase: 1, // 1 = now and then it dashes after the mouse cursor for a few seconds
-  background: 1, // 1 = freeze (no timers, no frames) while the window is hidden, minimised or unfocused
+  background: 1, // 1 = freeze (no timers, no frames) while the window is hidden, minimised or unfocused; also rests when the machine is overloaded
+  maxFrameDt: 0.25, // longest stretch of time one frame may simulate (s); slower frames than this run in slow motion
+  overloadGapMs: 600, // frames this far apart on average count as an overloaded machine...
+  overloadForMs: 8000, // ...once that has lasted this long the spider rests
+  overloadRetryMs: 45000, // and tries again after this long
+  cheer: 1, // 1 = a little victory dance when a long run finishes well
+  cheerAfterMs: 45000, // a run must last this long to deserve a dance
+  skin: 0, // colour: 0 = follow the theme, 1-5 = a fixed colour (see SKINS)
   blurGraceMs: 4000, // an unfocused but visible window keeps going this long before freezing
   chaseEveryMs: 60000, // average gap between chases
   chaseMs: 5000, // how long a chase lasts
@@ -107,7 +117,7 @@ const helperReg = new Map(); // id -> { id, done, ok, seen, pulse, born }
 
 function handleSubagentEvent(t, payload, now) {
   const p = payload && typeof payload === 'object' ? payload : {};
-  const id = String(p.subagent_id || `${p.parent_id || 'root'}:${p.task_index == null ? 0 : p.task_index}:${p.goal || ''}`);
+  const id = String(p.subagent_id || p.child_session_id || `${p.parent_id || 'root'}:${p.task_index == null ? 0 : p.task_index}:${p.goal || ''}`);
   const status = typeof p.status === 'string' ? p.status : '';
   const finished = t === 'subagent.complete' || SUBAGENT_DONE.has(status);
   let e = helperReg.get(id);
@@ -129,7 +139,7 @@ function handleSubagentEvent(t, payload, now) {
 }
 
 // --- the work web grows with the agent's run; spider-sense reacts to risky commands ---
-const run = { active: false, strands: 0, result: null, resultAt: 0, seen: 0 };
+const run = { active: false, strands: 0, result: null, resultAt: 0, seen: 0, startedAt: 0, cheer: false };
 const danger = { until: 0, at: 0 };
 const RISKY =
   /\brm\s+\S|\bsudo\b|\bmkfs\b|\bdd\s+if=|\bchmod\s+(-R|0?777)|\bchown\s+-R|git\s+(reset\s+--hard|push\s+(--force|-f\b)|clean\s+-\w*f|checkout\s+--)|drop\s+(table|database)|\btruncate\b|>\s*\/dev\/sd|\bkill\s+-9|\bshutdown\b|\breboot\b|curl[^|]*\|\s*(ba)?sh|\bdel\s+\/[sq]|\brmdir\b|:\(\)\s*\{|\bdangerous\b|\bdestructive\b/i;
@@ -156,11 +166,13 @@ function trackRun(t, payload, now) {
     run.strands = 0;
     run.result = null;
     run.seen = now;
+    run.startedAt = now;
   } else if (t === 'tool.start') {
     if (!run.active) {
       run.active = true;
       run.strands = 0;
       run.result = null;
+      run.startedAt = now;
     }
     run.seen = now;
     run.strands = Math.min(WEB_MAX_SEGS, run.strands + 1);
@@ -174,6 +186,7 @@ function trackRun(t, payload, now) {
     run.active = false;
     run.result = status === 'error' ? 'error' : status === 'interrupted' ? null : 'done';
     run.resultAt = now;
+    if (run.result === 'done' && CONFIG.cheer && run.startedAt && now - run.startedAt > CONFIG.cheerAfterMs) run.cheer = true;
   } else if (t === 'error') {
     run.active = false;
     run.result = 'error';
@@ -198,31 +211,12 @@ function findAttentionEl(kind) {
   for (const el of pool) {
     if (el.closest('[data-wcs]') || !isVisible(el)) continue;
     if (kind === 'waiting') {
-      const label = (el.textContent || '').trim();
+      const label = (el.textContent || '').replace(/[^\p{L}\s]/gu, '').trim(); // the real button reads "Run \u21b5"
       if (!/^(run|approve|allow|allow once|accept|yes|continue)$/i.test(label) && !/approval needed/i.test(el.getAttribute('aria-label') || '')) continue;
     }
     found.push(el);
   }
   return found.length ? found[found.length - 1] : null; // the newest one is lowest in the chat
-}
-
-/** Where a creature's body may stand so that its legs, knees and fangs stay fully inside the window. */
-function bounds(c) {
-  const m = 46 * c.size;
-  const top = 56 * c.size; // knees arch upward on screen
-  return { x0: m, x1: Math.max(m, window.innerWidth - m), y0: top, y1: Math.max(top, window.innerHeight - m) };
-}
-
-function clampTo(c, x, y) {
-  const b = bounds(c);
-  return { x: Math.min(Math.max(x, b.x0), b.x1), y: Math.min(Math.max(y, b.y0), b.y1) };
-}
-
-function faceToward(c, x, y, k) {
-  let d = Math.atan2(y - c.body.y, x - c.body.x) - c.body.angle;
-  while (d > Math.PI) d -= 2 * Math.PI;
-  while (d < -Math.PI) d += 2 * Math.PI;
-  c.body.angle += d * k;
 }
 
 function handleGatewayEvent(event) {
@@ -262,8 +256,38 @@ function moodNow(now) {
   return { name: 'idle', color: null, pace: 1 };
 }
 
+/** Where a creature's body may stand so that its legs, knees and fangs stay fully inside the window. */
+function bounds(c) {
+  const m = 46 * c.size;
+  const top = 56 * c.size; // knees arch upward on screen
+  return { x0: m, x1: Math.max(m, window.innerWidth - m), y0: top, y1: Math.max(top, window.innerHeight - m) };
+}
+
+function clampTo(c, x, y) {
+  const b = bounds(c);
+  return { x: Math.min(Math.max(x, b.x0), b.x1), y: Math.min(Math.max(y, b.y0), b.y1) };
+}
+
+function faceToward(c, x, y, k) {
+  let d = Math.atan2(y - c.body.y, x - c.body.x) - c.body.angle;
+  while (d > Math.PI) d -= 2 * Math.PI;
+  while (d < -Math.PI) d += 2 * Math.PI;
+  c.body.angle += d * k;
+}
+
+const SKINS = [
+  { name: 'Theme', color: null },
+  { name: 'Ember', color: '#ff9f1c' },
+  { name: 'Moss', color: '#7bd88f' },
+  { name: 'Ice', color: '#7fd4ff' },
+  { name: 'Violet', color: '#c792ea' },
+  { name: 'Rose', color: '#ff6b9d' },
+];
+
 function resolveThemeColor(forced) {
   if (forced) return forced;
+  const skin = SKINS[Math.round(CONFIG.skin)];
+  if (skin && skin.color) return skin.color;
   const cs = getComputedStyle(document.documentElement);
   for (const name of THEME_VAR_NAMES) {
     let v = cs.getPropertyValue(name).trim();
@@ -824,6 +848,13 @@ function startSpider(ctx) {
     }
 
     // a visiting spider: wave front legs at each other
+    if (run.cheer) {
+      run.cheer = false;
+      if (st.mode === 'dwell' || st.mode === 'walk') {
+        st.wave = 150;
+        st.hop = Math.max(st.hop, 10 * size);
+      }
+    }
     if (st.wave > 0) {
       st.wave--;
       st.mode = 'dwell';
@@ -835,6 +866,7 @@ function startSpider(ctx) {
       legs[4].tapOffset = Math.max(legs[4].tapOffset, 12 * size * (1 - w));
       const g = creatures.find((c) => c.role === 'guest');
       if (g) faceToward(main, g.body.x, g.body.y, 0.1);
+      else st.hop = Math.max(st.hop, (1 + Math.sin(now / 90)) * 4 * size); // cheering: little jumps
       return;
     }
 
@@ -1875,13 +1907,30 @@ function startSpider(ctx) {
   }
   let guide = null;
   let lastGuide = null;
+  let gapEma = 0; // smoothed time between frames (ms)
+  let overloadSince = 0;
+  let overloaded = false;
+  let overloadTimer = null;
   let nestVisible = false;
   let webWasVisible = false;
 
   function loop(now) {
     if (paused || suspended) return; // loop fully stops; resume() / wakeUp() restarts it
-    const frameDt = lastTime ? Math.min((now - lastTime) / 1000, 0.1) : STEP;
+    const frameGap = lastTime ? now - lastTime : 0;
+    const frameDt = lastTime ? Math.min(frameGap / 1000, CONFIG.maxFrameDt) : STEP;
     lastTime = now;
+    if (frameGap > 0) {
+      gapEma += (frameGap - gapEma) * 0.2;
+      if (CONFIG.background && gapEma > CONFIG.overloadGapMs) {
+        if (!overloadSince) overloadSince = now;
+        if (now - overloadSince > CONFIG.overloadForMs) {
+          restForOverload();
+          return;
+        }
+      } else {
+        overloadSince = 0;
+      }
+    }
     acc += frameDt;
     while (acc >= STEP) {
       fixedUpdate();
@@ -1930,10 +1979,24 @@ function startSpider(ctx) {
     cancelAnimationFrame(rafId);
     post({ t: 'gone' });
   }
+  /** A machine so busy that frames come seconds apart gets no benefit from animation: rest, then try again. */
+  function restForOverload() {
+    overloaded = true;
+    overloadSince = 0;
+    gapEma = 0;
+    suspend();
+    clearTimeout(overloadTimer);
+    overloadTimer = setTimeout(() => {
+      overloaded = false;
+      if (!wantsSuspend()) wakeUp();
+    }, CONFIG.overloadRetryMs);
+  }
   function wakeUp() {
     if (!suspended) return;
     suspended = false;
     lastTime = 0;
+    gapEma = 0;
+    overloadSince = 0;
     lastActivity = performance.now();
     collectNow();
     post({ t: 'hello' });
@@ -1942,8 +2005,9 @@ function startSpider(ctx) {
   let blurTimer = null;
   function checkVisibility() {
     clearTimeout(blurTimer);
-    if (!wantsSuspend()) wakeUp();
-    else if (document.hidden) suspend();
+    if (!wantsSuspend()) {
+      if (!overloaded) wakeUp();
+    } else if (document.hidden) suspend();
     else blurTimer = setTimeout(() => wantsSuspend() && suspend(), CONFIG.blurGraceMs);
   }
   document.addEventListener('visibilitychange', checkVisibility);
@@ -1965,6 +2029,7 @@ function startSpider(ctx) {
   function destroy() {
     cancelAnimationFrame(rafId);
     clearTimeout(blurTimer);
+    clearTimeout(overloadTimer);
     document.removeEventListener('visibilitychange', checkVisibility);
     window.removeEventListener('blur', checkVisibility);
     window.removeEventListener('focus', checkVisibility);
@@ -2011,6 +2076,7 @@ function startSpider(ctx) {
     destroy,
     isPaused,
     isSuspended: () => suspended,
+    isOverloaded: () => overloaded,
     checkVisibility,
     pausedChanged: null,
     _debug: () => ({ body, legs, state, targets, history, creatures, main, pointer, guide, bug, wind, shake, peers, attEl, run, danger, myId, web: webAlpha(performance.now()) }),
@@ -2045,8 +2111,9 @@ const SETTING_LIMITS = {
   chase: [0, 1],
   background: [0, 1],
   explore: [0, 1],
+  skin: [0, SKINS.length - 1],
 };
-const DEFAULTS = { size: CONFIG.size, speed: CONFIG.speed, bodyScale: CONFIG.bodyScale, trail: CONFIG.trail, bugs: CONFIG.bugs, helpers: CONFIG.helpers, web: CONFIG.web, attention: CONFIG.attention, wind: CONFIG.wind, peers: CONFIG.peers, chase: CONFIG.chase, background: CONFIG.background, explore: CONFIG.explore };
+const DEFAULTS = { size: CONFIG.size, speed: CONFIG.speed, bodyScale: CONFIG.bodyScale, trail: CONFIG.trail, bugs: CONFIG.bugs, helpers: CONFIG.helpers, web: CONFIG.web, attention: CONFIG.attention, wind: CONFIG.wind, peers: CONFIG.peers, chase: CONFIG.chase, background: CONFIG.background, explore: CONFIG.explore, skin: CONFIG.skin };
 
 let chipSetPaused = null;
 let activeApi = null;
@@ -2123,6 +2190,15 @@ function demoSense() {
   setTimeout(() => handleGatewayEvent({ type: 'approval.received', payload: {} }), 9000);
 }
 
+/** Everything at once, for a first look: a fly, a work web, a helper, a risky command and a visitor. */
+function demoAll() {
+  if (activeApi) activeApi.spawnBug();
+  demoWeb();
+  demoHelper();
+  setTimeout(demoSense, 3000);
+  setTimeout(() => activeApi && activeApi.spawnGuest(), 6000);
+}
+
 function resetSettings() {
   Object.assign(CONFIG, DEFAULTS);
   saveSettings();
@@ -2159,6 +2235,9 @@ function popStyle(el, anchor, width) {
     `right:${Math.max(8, Math.round(window.innerWidth - r.right))}px`,
     `bottom:${Math.max(8, Math.round(window.innerHeight - r.top + 8))}px`,
     `width:${width}px`,
+    `max-height:${Math.max(160, Math.round(r.top - 24))}px`, // a short window scrolls the panel instead of cutting it off
+    'overflow-y:auto',
+    'box-sizing:border-box',
     `z-index:${CONFIG.zIndex + 1}`,
     'padding:12px 14px',
     'border-radius:10px',
@@ -2214,7 +2293,7 @@ function showHint(anchor) {
   popStyle(hintEl, anchor, 250);
   hintEl.style.cursor = 'pointer';
   hintEl.append(
-    el('b', {}, 'Web Crawler Spider is here 🕷️'),
+    el('b', {}, 'Web Crawler Spider is here'),
     el('div', { style: 'margin-top:4px;opacity:.8' }, 'Click the spider icon for its settings, or press Ctrl+K and type "Spider" for commands and demos.')
   );
   document.body.append(hintEl);
@@ -2233,7 +2312,7 @@ function togglePanel(anchor) {
   popStyle(panelEl, anchor, 288);
 
   const paused = !!(activeApi && activeApi.isPaused());
-  const header = el('div', { style: row('justify-content:space-between;margin-bottom:8px') }, el('b', {}, '🕷️ Web Crawler Spider'), el('span', { style: 'opacity:.55' }, VERSION));
+  const header = el('div', { style: row('justify-content:space-between;margin-bottom:8px') }, el('b', {}, 'Web Crawler Spider'), el('span', { style: 'opacity:.55' }, VERSION));
   panelEl.append(header);
 
   const pauseBtn = el('button', { 'data-act': 'pause', style: btnStyle(), onclick: () => { if (activeApi) activeApi.toggle(); pauseBtn.textContent = activeApi && activeApi.isPaused() ? 'Resume' : 'Pause'; } }, paused ? 'Resume' : 'Pause');
@@ -2242,6 +2321,7 @@ function togglePanel(anchor) {
     { style: row('flex-wrap:wrap;margin-bottom:10px') },
     pauseBtn,
     el('button', { 'data-act': 'fly', style: btnStyle(), onclick: () => activeApi && activeApi.spawnBug() }, 'Release a fly'),
+    el('button', { 'data-act': 'demo', style: btnStyle(), onclick: () => { closePanel(); demoAll(); } }, 'Demo all'),
     el('button', { 'data-act': 'nap', style: btnStyle(), onclick: () => { closePanel(); if (activeApi) activeApi.nap(); } }, 'Nap'),
     el('button', { 'data-act': 'reset', style: btnStyle(), onclick: () => { resetSettings(); closePanel(); } }, 'Reset')
   );
@@ -2255,6 +2335,19 @@ function togglePanel(anchor) {
     input.addEventListener('change', () => setSetting(key, Number(input.value))); // on release: a change restarts the spider
     panelEl.append(el('label', { style: row('margin:4px 0') }, el('span', { style: 'width:44px' }, label), input, out));
   }
+  const swatches = el('div', { style: row('margin:6px 0 2px') }, el('span', { style: 'width:44px' }, 'Colour'));
+  SKINS.forEach((skin, i) => {
+    const on = Math.round(CONFIG.skin) === i;
+    const dot = el('button', {
+      'data-skin': String(i),
+      title: skin.name,
+      'aria-label': `Colour: ${skin.name}`,
+      style: `width:20px;height:20px;border-radius:50%;cursor:pointer;padding:0;background:${skin.color || 'conic-gradient(#7fd4ff,#c792ea,#ff6b9d,#ff9f1c,#7bd88f,#7fd4ff)'};border:2px solid ${on ? 'var(--foreground,#fff)' : 'transparent'}`,
+      onclick: () => setSetting('skin', i),
+    });
+    swatches.append(dot);
+  });
+  panelEl.append(swatches);
   const list = el('div', { style: 'margin-top:8px;display:flex;flex-direction:column;gap:5px' });
   for (const [key, label] of PANEL_TOGGLES) {
     const box = el('input', { type: 'checkbox', 'data-key': key });
@@ -2272,6 +2365,30 @@ function togglePanel(anchor) {
 
 function btnStyle() {
   return 'padding:3px 9px;border-radius:6px;cursor:pointer;font:inherit;color:inherit;background:color-mix(in srgb,var(--foreground,#888) 10%,transparent);border:1px solid color-mix(in srgb,var(--foreground,#888) 22%,transparent)';
+}
+
+const ICON_LEGS = ['M6 7.2 3.8 4.2 2.2 3', 'M5.8 8.6 2.6 7.4 1 8.4', 'M5.8 9.8 2.6 11 1.4 12.8', 'M6.3 11 4 13.4 3.2 15'];
+const mirror = (d) => d.replace(/(\d+(?:\.\d+)?) (\d+(?:\.\d+)?)/g, (m, x, y) => `${Math.round((16 - Number(x)) * 10) / 10} ${y}`);
+
+/** A small drawn spider for the status bar; takes the text colour, so it follows the theme. */
+function spiderIcon() {
+  const legs = [...ICON_LEGS, ...ICON_LEGS.map(mirror)];
+  return jsx('svg', {
+    width: 16,
+    height: 16,
+    viewBox: '0 0 16 16',
+    fill: 'none',
+    stroke: 'currentColor',
+    strokeWidth: 1.1,
+    strokeLinecap: 'round',
+    strokeLinejoin: 'round',
+    'aria-hidden': 'true',
+    children: [
+      ...legs.map((d, i) => jsx('path', { d }, `l${i}`)),
+      jsx('ellipse', { cx: 8, cy: 9.6, rx: 2.3, ry: 3, fill: 'currentColor', stroke: 'none' }, 'b'),
+      jsx('circle', { cx: 8, cy: 5.6, r: 1.5, fill: 'currentColor', stroke: 'none' }, 'h'),
+    ],
+  });
 }
 
 function SpiderChip() {
@@ -2295,15 +2412,18 @@ function SpiderChip() {
     'data-wcs': 'chip',
     onClick: (e) => togglePanel(e.currentTarget),
     title: `Web Crawler Spider settings — ${VERSION}`,
+    'aria-label': 'Web Crawler Spider settings',
     style: {
       background: 'none',
       border: 'none',
       cursor: 'pointer',
-      fontSize: '13px',
+      color: 'inherit',
+      display: 'inline-flex',
+      alignItems: 'center',
       opacity: paused ? 0.45 : 1,
       padding: '0 4px',
     },
-    children: '\uD83D\uDD77\uFE0F',
+    children: spiderIcon(),
   });
 }
 
@@ -2352,6 +2472,8 @@ const WebCrawlerSpiderPlugin = {
       paletteCommand('guest-demo', 'Show a visiting spider (demo)', ['window', 'visit', 'friend', 'demo'], () => activeApi && activeApi.spawnGuest()),
       paletteCommand('visit', 'Send my spider to visit another window', ['window', 'visit', 'friend'], () => activeApi && activeApi.visitNow()),
       paletteCommand('chase', 'Cursor chase on / off', ['mouse', 'pointer', 'chase'], () => adjust('chase', 1, CONFIG.chase ? -1 : 1)),
+      paletteCommand('demo-all', 'Show everything (fly, web, helper, risky command, visitor)', ['demo', 'all', 'tour', 'showcase'], demoAll),
+      paletteCommand('colour', 'Next colour', ['color', 'colour', 'skin', 'theme'], () => adjust('skin', 1, CONFIG.skin >= SKINS.length - 1 ? -(SKINS.length - 1) : 1)),
       paletteCommand('explore', 'Explore the app (walk to buttons) on / off', ['explore', 'walk', 'buttons', 'dom', 'page'], () => adjust('explore', 1, CONFIG.explore ? -1 : 1)),
       paletteCommand('background', 'Freeze in the background on / off', ['background', 'idle', 'cpu', 'battery', 'focus'], () => adjust('background', 1, CONFIG.background ? -1 : 1)),
       paletteCommand('chase-now', 'Chase my cursor now', ['mouse', 'pointer', 'chase'], () => activeApi && activeApi.chase()),

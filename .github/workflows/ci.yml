@@ -15,4 +15,7 @@ jobs:
           node-version: 20
           cache: npm
       - run: npm ci
+      - run: npm run check:build
       - run: npm test
+      - run: SEED=2 node tests/test.mjs
+      - run: SEED=3 node tests/test.mjs

@@ -4,13 +4,15 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Hermes Desktop](https://img.shields.io/badge/Hermes_Desktop-%E2%89%A50.22-7c8cff)
 
-A Hermes Desktop plugin: an eight-legged spider that literally crawls the Hermes window. It walks between the
-real buttons, links and inputs, outlines the one it is standing on, and reacts to what the agent is doing.
+A Hermes Desktop plugin: an eight-legged spider that lives on the Hermes window and reacts to what the agent
+is doing. It spins a web while tools run, sends helper spiders for subagents, gets restless when Hermes waits for
+you and freezes when a command looks risky.
 
-![The spider walking over a demo page](docs/walk.gif)
+![A spider roaming, a web growing in the corner and a helper spider at work](docs/demo.gif)
 
-It only reads the page. It never clicks, edits, hides or restyles anything, and the overlay it draws ignores
-the mouse, so you can always click straight through it.
+By default it reads nothing from the app; it only listens to the events Hermes already sends it. It never
+clicks, edits, hides or restyles anything, and the overlay it draws ignores the mouse, so you can always click
+straight through it.
 
 ## Install
 
@@ -22,8 +24,9 @@ hermes plugins enable web-crawler-spider
 ```
 
 Or by hand: copy `desktop/plugin.js` to `~/.hermes/desktop-plugins/web-crawler-spider/plugin.js`. Hermes Desktop
-loads it within a few seconds. The first time, a small bubble points you to the 🕷 chip in the status bar: click it
-for the settings panel (sliders for size, speed and body, a switch for every feature, pause, nap, reset).
+loads it within a few seconds. The first time, a small bubble points you to the spider icon in the status bar: click
+it for the settings panel (sliders for size, speed and body, a colour picker, a switch for every feature, pause,
+nap, reset and a *Demo all* button that shows every trick in half a minute).
 
 ## What it does
 
@@ -54,16 +57,19 @@ for the settings panel (sliders for size, speed and body, a switch for every fea
 - **Visitors.** With two Hermes windows open, their spiders visit each other and wave.
 - **Light on the CPU.** When the window is hidden or minimised the spider freezes at once; if it just loses focus it
   freezes after a few seconds. No animation frames, no DOM scanning, no timers doing work, until you come back.
-  Switch it off in the settings panel if you want it to keep going.
+  On a machine so busy that frames come seconds apart it rests for a while and tries again. Switch this off in the
+  settings panel if you want it to keep going.
+- **Colours and cheers.** Follows your theme, or pick Ember, Moss, Ice, Violet or Rose. After a long run that ends
+  well it does a little victory dance.
 - It always stays fully inside the window.
 
 ## Commands (Ctrl+K → "Spider: …")
 
 Pause / resume, Bigger, Smaller, Faster, Slower, Bigger body, Smaller body, Silk guide line on/off, Flies on/off,
-Release a fly, Helper spiders on/off, Work web on/off, Attention + spider-sense on/off, Wind on/off, Explore the app on/off, Visiting
+Release a fly, Helper spiders on/off, Work web on/off, Attention + spider-sense on/off, Wind on/off, Explore the app on/off, Next colour, Visiting
 between windows on/off, Cursor chase on/off, Freeze in the background on/off, Take a nap, Wake up, Reset size, speed and extras.
 
-Demos (no real work needed): Show a helper spider, Show the work web, Test spider-sense, Show a visiting spider,
+Demos (no real work needed): Show everything, Show a helper spider, Show the work web, Test spider-sense, Show a visiting spider,
 Send my spider to visit another window, Chase my cursor now.
 
 Everything in the settings panel is also available from the palette. Settings are saved in the plugin's own storage and survive restarts.
@@ -89,14 +95,20 @@ Everything in the settings panel is also available from the palette. Settings ar
 
 ## Develop
 
-`desktop/plugin.js` is a single ES module with no build step. The logic test runs the plugin in jsdom with a
-simulated clock (about 150 checks, a few minutes):
+Hermes loads one file, `desktop/plugin.js`, but it is built from the pieces in `src/` (config, events, geometry,
+the spider itself, settings, the panel, the plugin entry) by a tiny script with no dependencies. Edit `src/`,
+then build. The built file is committed, because that is what the catalog pins.
 
 ```bash
 npm install
-npm test
+npm run build        # src/*.js -> desktop/plugin.js
+npm test             # checks the build is current, then runs the logic test in jsdom
+SEED=2 npm test      # the test uses seeded random numbers; try another seed
 hermes plugins validate .
 ```
+
+The test plays the plugin through a simulated clock (about 170 checks, a few minutes). To try a change in the
+app, copy `desktop/plugin.js` to `~/.hermes/desktop-plugins/web-crawler-spider/plugin.js`.
 
 ## Licence
 

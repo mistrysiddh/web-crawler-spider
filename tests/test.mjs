@@ -13,6 +13,17 @@ const check = (name, ok, extra = '') => {
   if (!ok) failures++;
 };
 
+// Seeded random numbers: every run plays out the same way. SEED=n picks another way (CI tries a few).
+const SEED = Number(process.env.SEED || 1);
+let seedState = SEED >>> 0;
+Math.random = () => {
+  seedState = (seedState + 0x6d2b79f5) | 0;
+  let t = Math.imul(seedState ^ (seedState >>> 15), 1 | seedState);
+  t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+  return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+};
+console.log(`seed ${SEED}`);
+
 // ---- DOM: a viewport with a status bar and a grid of buttons ----
 const dom = new JSDOM('<!doctype html><body style="background:#10121f"></body>', { pretendToBeVisual: true, url: 'http://localhost/' });
 const { window } = dom;
@@ -100,8 +111,8 @@ const setWindowState = ({ focused = winFocused, hidden = docHidden }) => {
 // ---- load the plugin with the SDK/React imports stubbed ----
 let src = fs.readFileSync(PLUGIN, 'utf8')
   .replace(/^import .*$/gm, '')
-  .replace('export default WebCrawlerSpiderPlugin;', 'export { startSpider, CONFIG, WebCrawlerSpiderPlugin, moodNow, handleGatewayEvent, togglePanel, closePanel, showHint };');
-src = "const PALETTE_AREA='palette', useRef=()=>({}), useEffect=()=>{}, useState=(v)=>[v,()=>{}], jsx=()=>null;\n" + src;
+  .replace('export default WebCrawlerSpiderPlugin;', 'export { startSpider, CONFIG, WebCrawlerSpiderPlugin, moodNow, handleGatewayEvent, togglePanel, closePanel, showHint, resolveThemeColor, SKINS, findAttentionEl, spiderIcon, demoAll };');
+src = "const PALETTE_AREA='palette', useRef=()=>({}), useEffect=()=>{}, useState=(v)=>[v,()=>{}], jsx=(...a)=>({ jsx: a });\n" + src;
 const tmp = path.join(os.tmpdir(), `wcs-under-test-${process.pid}.mjs`);
 fs.writeFileSync(tmp, src);
 const mod = await import(pathToFileURL(tmp).href);
@@ -586,6 +597,8 @@ void a1;
 
   check('panel: opens from the chip', mod.togglePanel(chip) === true && !!window.document.querySelector('[data-wcs="panel"]'));
   const panel = window.document.querySelector('[data-wcs="panel"]');
+  check('panel: six colour swatches and a Demo all button', panel.querySelectorAll('button[data-skin]').length === 6 && !!panel.querySelector('button[data-act=demo]'));
+  check('panel: no emoji in the panel text (they show as boxes on some systems)', !/\p{Extended_Pictographic}/u.test(panel.textContent));
   check('panel: 3 sliders and 10 toggles', panel.querySelectorAll('input[type=range]').length === 3 && panel.querySelectorAll('input[type=checkbox]').length === 10);
   check('panel: toggles show the current settings', [...panel.querySelectorAll('input[type=checkbox]')].every((b) => b.checked === !!mod.CONFIG[b.dataset.key]));
 
@@ -717,6 +730,7 @@ void a1;
   ev('approval.received');
   run(5);
   check('default mode: nothing in the app was read', calls.length === 0, calls.slice(0, 4).join(' | '));
+  ev('subagent.complete', { subagent_id: 'a1', status: 'completed' }); // leave the registry clean for later blocks
 
   // turning explore on walks the app again, and says so by reading it
   sp.destroy();
@@ -733,6 +747,116 @@ void a1;
   window.getComputedStyle = spies.getComputedStyle;
   mod.CONFIG.chase = 1;
   mod.CONFIG.explore = 1;
+}
+
+// ---- real Hermes event shapes, the real Run button, skins, cheering, slow machines ----
+{
+  if (window.__webCrawlerSpider) window.__webCrawlerSpider.destroy();
+  rafQueue.length = 0;
+  mod.CONFIG.bugs = 0; mod.CONFIG.helpers = 1; mod.CONFIG.chase = 0; mod.CONFIG.sleepAfterMs = 1e12; mod.CONFIG.explore = 1; mod.CONFIG.peers = 0;
+  const ev = (type, payload) => mod.handleGatewayEvent({ type, payload: payload || {} });
+  const st = () => ({ get storage() { return { get: () => undefined, set() {} }; } });
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  const mk = () => mod.startSpider({ storage: st().storage });
+
+  // subagents that identify themselves by child_session_id only (older emitters omit subagent_id)
+  let sp = mk();
+  run(1);
+  ev('subagent.start', { child_session_id: 'child-1', goal: 'research' });
+  ev('subagent.start', { child_session_id: 'child-2', goal: 'research' });
+  ev('subagent.progress', { child_session_id: 'child-1', goal: 'research' });
+  run(1);
+  check('events: subagents known only by child_session_id each get a helper', sp._debug().creatures.filter((c) => c.role === 'helper').length === 2);
+  ev('subagent.complete', { child_session_id: 'child-1', status: 'completed' });
+  ev('subagent.complete', { child_session_id: 'child-2', status: 'completed' });
+  run(25);
+  check('events: and the helpers leave when they finish', sp._debug().creatures.filter((c) => c.role === 'helper').length === 0);
+
+  // the real approval button reads "Run" followed by an enter-key glyph
+  const runBtn = addEl('button', 900, 640, 90, 34);
+  runBtn.textContent = 'Run ↵';
+  check('run button: found although its text carries the enter-key glyph', mod.findAttentionEl('waiting') === runBtn);
+  const other = addEl('button', 700, 640, 90, 34);
+  other.textContent = 'Running totals';
+  check('run button: other buttons whose text merely starts with Run are not mistaken for it', mod.findAttentionEl('waiting') === runBtn);
+  rects.delete(runBtn); runBtn.remove(); rects.delete(other); other.remove();
+
+  // skins
+  mod.CONFIG.skin = 0;
+  check('skin: default follows the theme (no fixed colour)', mod.resolveThemeColor(null) !== mod.SKINS[2].color);
+  mod.CONFIG.skin = 2;
+  check('skin: a chosen skin gives its colour', mod.resolveThemeColor(null) === mod.SKINS[2].color);
+  check('skin: a forced accent still wins', mod.resolveThemeColor('#123456') === '#123456');
+  mod.CONFIG.skin = 0;
+  check('skin: six choices, the first being the theme', mod.SKINS.length === 6 && mod.SKINS[0].color === null);
+
+  // the status-bar icon is drawn, not an emoji
+  const icon = mod.spiderIcon();
+  const kids = icon.jsx[1].children;
+  check('icon: a drawn svg with eight legs, a body and a head', icon.jsx[0] === 'svg' && kids.length === 10 && kids.slice(0, 8).every((k) => /^M/.test(k.jsx[1].d)));
+  check('icon: the mirrored legs sit on the other half', kids[4].jsx[1].d.startsWith('M10 ') && kids[0].jsx[1].d.startsWith('M6 '));
+
+  // a long run that ends well earns a victory dance; a short one does not
+  sp.destroy();
+  rafQueue.length = 0; // a destroyed spider's last queued frame must not run (the test's cancelAnimationFrame is a stub)
+  sp = mk();
+  run(1);
+  ev('message.start');
+  for (let i = 0; i < 50 * 60; i++) frame(); // 50 s of work
+  ev('message.complete', { status: 'complete' });
+  let cheered = false;
+  for (let i = 0; i < 90; i++) { frame(); if (sp._debug().state.wave > 0) cheered = true; }
+  check('cheer: a long successful run ends with a victory dance', cheered, `mode ${sp._debug().state.mode}, mood ${mod.moodNow(performance.now()).name}`);
+  run(4);
+  ev('message.start');
+  run(5);
+  ev('message.complete', { status: 'complete' });
+  let cheered2 = false;
+  for (let i = 0; i < 90; i++) { frame(); if (sp._debug().state.wave > 0) cheered2 = true; }
+  check('cheer: a short run does not', !cheered2);
+
+  // slow machine: frames seconds apart keep the right speed, and a truly overloaded machine gets rest
+  const slowFrame = (ms) => { now += ms; rafQueue.splice(0).forEach((cb) => cb(now)); };
+  const walkDistance = async (gapMs, seconds) => {
+    const w = mk();
+    const d = w._debug();
+    d.body.x = 150; d.body.y = 400; d.body.angle = 0;
+    d.state.mode = 'walk'; d.state.target.x = 1200; d.state.target.y = 400;
+    for (let i = 0; i < 20; i++) slowFrame(1000 / 60);
+    const x0 = d.body.x;
+    for (let t = 0; t < seconds * 1000; t += gapMs) { d.state.mode = 'walk'; d.state.target.x = 1200; d.state.target.y = 400; slowFrame(gapMs); }
+    const dist = d.body.x - x0;
+    w.destroy();
+    rafQueue.length = 0;
+    return dist;
+  };
+  sp.destroy();
+  rafQueue.length = 0;
+  mod.CONFIG.explore = 0; mod.CONFIG.bugs = 0; mod.CONFIG.helpers = 0;
+  const fast = await walkDistance(1000 / 60, 6);
+  const slow = await walkDistance(250, 6);
+  check('slow frames: four frames a second still cover about the same ground', slow > fast * 0.85 && slow < fast * 1.15, `fast ${fast.toFixed(0)} px, slow ${slow.toFixed(0)} px`);
+
+  mod.CONFIG.overloadRetryMs = 60;
+  const ov = mk();
+  for (let i = 0; i < 20; i++) slowFrame(1000 / 60);
+  check('overload: normal frames never trigger it', !ov.isOverloaded());
+  for (let i = 0; i < 40 && !ov.isOverloaded(); i++) slowFrame(900); // about one frame a second, for 10 s or more
+  check('overload: frames a second apart for long enough make it rest', ov.isOverloaded() && ov.isSuspended());
+  slowFrame(1000 / 60); slowFrame(1000 / 60);
+  check('overload: a resting spider queues no more frames', rafQueue.length === 0);
+  await wait(200);
+  check('overload: it tries again after the retry time', !ov.isOverloaded() && !ov.isSuspended());
+  ov.destroy();
+  rafQueue.length = 0;
+  mod.CONFIG.background = 0;
+  const ov2 = mk();
+  for (let i = 0; i < 30; i++) slowFrame(900);
+  check('overload: with the background setting off it never rests', !ov2.isOverloaded());
+  ov2.destroy();
+  rafQueue.length = 0;
+  mod.CONFIG.background = 1;
+  mod.CONFIG.explore = 1; mod.CONFIG.bugs = 0; mod.CONFIG.helpers = 1; mod.CONFIG.chase = 1;
 }
 
 // ---- background throttling: a hidden / unfocused window does no work ----
