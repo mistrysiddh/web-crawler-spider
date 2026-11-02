@@ -48,6 +48,7 @@ const CONFIG = {
   chaseMs: 5000, // how long a chase lasts
   web: 1, // 1 = a web grows in the corner while the agent works (a strand per tool call)
   attention: 1, // 1 = it senses risky commands; with explore on it also walks to the button that needs you
+  guardian: 1, // 1 = when an approval / sudo / clarify / secret prompt shows, the spider stands on it and won't leave until you respond
   wind: 1, // 1 = scrolling or moving the window makes the silk sway and the spider cling
   peers: 1, // 1 = spiders in other Hermes windows visit each other
   visitEveryMs: 100000, // average gap between visits when another window is open
@@ -219,6 +220,24 @@ function findAttentionEl(kind) {
   return found.length ? found[found.length - 1] : null; // the newest one is lowest in the chat
 }
 
+/** Find the approve / allow / yes button that Hermes just asked the user to press. */
+function findGuardianEl() {
+  const found = [];
+  const pool = document.querySelectorAll('button, [role="button"], [role="menuitem"]');
+  for (const el of pool) {
+    if (el.closest('[data-wcs]') || !isVisible(el)) continue;
+    const label = ((el.textContent || '') + ' ' + (el.getAttribute('aria-label') || '')).replace(/[^\p{L}\s]/gu, ' ').trim();
+    const low = label.toLowerCase();
+    if (
+      /^(approve|allow|yes|accept|confirm|ok|run|proceed|continue|grant|authorize|authorise)$/i.test(low) ||
+      /approve|allow|authoriz|grant/i.test(label)
+    ) {
+      found.push(el);
+    }
+  }
+  return found.length ? found[found.length - 1] : null; // newest = lowest in the dialog
+}
+
 function handleGatewayEvent(event) {
   if (!event || typeof event.type !== 'string') return;
   const t = event.type;
@@ -227,8 +246,26 @@ function handleGatewayEvent(event) {
   trackRun(t, event.payload, now);
   if (t === 'approval.request' || t === 'sudo.request' || t === 'clarify.request' || t === 'secret.request') {
     mood.waiting = true;
-  } else if (t === 'approval.cancelled' || t === 'approval.received' || t === 'approval.respond') {
+    if (CONFIG.guardian) {
+      guardEl = findGuardianEl();
+      guardUntil = 0; // never auto-release; user must respond
+      guardPulse = 1;
+      if (guardEl && (state.mode === 'dwell' || state.mode === 'walk' || state.mode === 'attend' || state.mode === 'guard')) {
+        state.mode = 'guard';
+        state.currentEl = guardEl;
+        const r = guardEl.getBoundingClientRect();
+        state.target = { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+      }
+    }
+  } else if (t === 'approval.cancelled' || t === 'approval.received' || t === 'approval.respond' || t === 'secret.respond') {
     mood.waiting = false;
+    guardEl = null;
+    guardUntil = now + 800;
+    guardPulse = 0;
+    if (state.mode === 'guard') {
+      state.mode = 'dwell';
+      state.dwellUntil = now + 600;
+    }
   } else if (t === 'error') {
     mood.errorUntil = now + 15000;
     mood.workUntil = 0;
@@ -950,6 +987,43 @@ function startSpider(ctx) {
       } else {
         st.bob = Math.sin(now / (CONFIG.stepDurationMs * 0.5)) * 1.1;
       }
+    } else if (st.mode === 'guard') {
+      // guardian: stand on top of the approval / sudo / clarify button, pulse a web around it
+      const g = guardEl;
+      const guarding = g && g.isConnected && CONFIG.guardian;
+      if (!guarding) {
+        st.mode = 'dwell';
+        st.dwellUntil = now + 600;
+        guardPulse = 0;
+      } else {
+        const r = g.getBoundingClientRect();
+        const bx = r.left + r.width / 2;
+        const by = r.top + r.height / 2;
+        st.target.x = bx;
+        st.target.y = by;
+        // stand directly on the button (slightly above so legs frame it)
+        const sx = Math.max(30, bx);
+        const sy = Math.max(30, by - 6 * size);
+        if (walkToward(main, sx, sy, 1.2, 10)) {
+          faceToward(main, bx, by, 0.2);
+          st.bob = Math.sin(now / 100) * 0.8; // tense, ready
+          st.headTwitch = Math.sin(now / 70) * 0.08;
+          guardPulse = Math.min(1, guardPulse + 0.03);
+          if (st.tapTick++ % 20 === 0) {
+            const leg = legs[(st.tapTick / 20) & 1 ? 0 : 4];
+            if (!leg.stepping) leg.tapOffset = 11 * size;
+          }
+        } else {
+          st.bob = Math.sin(now / (CONFIG.stepDurationMs * 0.5)) * 0.9;
+        }
+        // release when the element vanishes or a response comes in
+        if (guardUntil > 0 && now > guardUntil) {
+          st.mode = 'dwell';
+          st.dwellUntil = now + 600;
+          guardEl = null;
+          guardPulse = 0;
+        }
+      }
     } else if (st.mode === 'nest') {
       const n = nestSpot();
       st.bob = Math.sin(now / (CONFIG.stepDurationMs * 0.5)) * 0.9;
@@ -1208,6 +1282,9 @@ function startSpider(ctx) {
     nextChaseAt = now + CONFIG.chaseEveryMs * (0.7 + Math.random() * 0.6);
   }
   let attTick = 0;
+  let guardEl = null;   // the element the spider is guarding (approval / sudo / clarify / secret)
+  let guardUntil = 0;   // performance.now() when the guardian should release (0 = forever until dismissed)
+  let guardPulse = 0;   // 0..1 pulsing intensity for the silk web
   function raiseFront(c, h) {
     c.legs[0].tapOffset = Math.max(c.legs[0].tapOffset, h * c.size);
     c.legs[4].tapOffset = Math.max(c.legs[4].tapOffset, h * c.size);
@@ -1693,6 +1770,57 @@ function startSpider(ctx) {
     ctx2d.restore();
   }
 
+  /** Pulsing silk web around the element the spider is guarding (approval / sudo / clarify). */
+  function drawGuardianWeb(now) {
+    if (!guardEl || !guardEl.isConnected) return;
+    const r = guardEl.getBoundingClientRect();
+    const cx = r.left + r.width / 2;
+    const cy = r.top + r.height / 2;
+    const R = 40 + Math.sin(now / 120) * 6 * guardPulse;
+    ctx2d.save();
+    ctx2d.strokeStyle = '#ff3b3b';
+    ctx2d.fillStyle = '#ff3b3b';
+    ctx2d.lineWidth = 1.5;
+    ctx2d.lineCap = 'round';
+    ctx2d.lineJoin = 'round';
+    // outer pulse ring
+    ctx2d.globalAlpha = 0.35 * guardPulse;
+    ctx2d.beginPath();
+    ctx2d.arc(cx, cy, R, 0, Math.PI * 2);
+    ctx2d.stroke();
+    // cross threads
+    ctx2d.globalAlpha = 0.5 * guardPulse;
+    for (let i = 0; i < 6; i++) {
+      const a = (i / 6) * Math.PI * 2 + now / 300;
+      ctx2d.beginPath();
+      ctx2d.moveTo(cx, cy);
+      ctx2d.lineTo(cx + Math.cos(a) * R, cy + Math.sin(a) * R);
+      ctx2d.stroke();
+    }
+    // corner brackets on the element itself
+    ctx2d.globalAlpha = 0.9 * guardPulse;
+    const s = 6;
+    const corners = [
+      [r.left, r.top, 'tl'],
+      [r.left + r.width, r.top, 'tr'],
+      [r.left, r.top + r.height, 'bl'],
+      [r.left + r.width, r.top + r.height, 'br'],
+    ];
+    for (const [x, y] of corners) {
+      ctx2d.beginPath();
+      ctx2d.moveTo(x - s, y);
+      ctx2d.lineTo(x, y);
+      ctx2d.lineTo(x, y - s);
+      ctx2d.stroke();
+      ctx2d.beginPath();
+      ctx2d.moveTo(x + s, y);
+      ctx2d.lineTo(x, y);
+      ctx2d.lineTo(x, y + s);
+      ctx2d.stroke();
+    }
+    ctx2d.restore();
+  }
+
   function drawBug(now) {
     if (!bug) return;
     ctx2d.save();
@@ -1900,6 +2028,7 @@ function startSpider(ctx) {
     if (wa > 0.01) drawWorkWeb(now, wa);
     if (guide) drawGuide(guide, now);
     drawBug(now);
+    if (guardEl && guardEl.isConnected && guardPulse > 0) drawGuardianWeb(now);
     // far-to-near so a creature lower on screen overlaps one above it
     const order = creatures.slice().sort((a, b) => a.body.y - b.body.y);
     for (const c of order) if (!c.hidden) drawCreature(c, c.tint || accentNow);
@@ -2058,6 +2187,7 @@ function startSpider(ctx) {
     nap,
     wake,
     spawnBug,
+    guardDemo,
     spawnHelperDemo,
     spawnGuest: () => spawnGuest(null),
     chase: () => {
@@ -2187,6 +2317,12 @@ function demoWeb() {
 /** Fake an approval request for a destructive command: spider-sense, then the walk to the Run button. */
 function demoSense() {
   handleGatewayEvent({ type: 'approval.request', payload: { command: 'rm -rf ./demo', description: 'demo' } });
+  setTimeout(() => handleGatewayEvent({ type: 'approval.received', payload: {} }), 9000);
+}
+
+/** Fake an approval request so you can see the guardian in action. */
+function guardDemo() {
+  handleGatewayEvent({ type: 'approval.request', payload: { command: 'sudo npm install', description: 'demo' } });
   setTimeout(() => handleGatewayEvent({ type: 'approval.received', payload: {} }), 9000);
 }
 
@@ -2466,6 +2602,8 @@ const WebCrawlerSpiderPlugin = {
       paletteCommand('web', 'Work web on / off', ['progress', 'tool', 'web'], () => adjust('web', 1, CONFIG.web ? -1 : 1)),
       paletteCommand('web-demo', 'Show the work web (9 s demo)', ['progress', 'web', 'demo'], demoWeb),
       paletteCommand('attention', 'Attention + spider-sense on / off', ['approval', 'danger', 'attention'], () => adjust('attention', 1, CONFIG.attention ? -1 : 1)),
+      paletteCommand('guardian', 'Approval guardian on / off', ['guard', 'approval', 'sudo', 'protect'], () => adjust('guardian', 1, CONFIG.guardian ? -1 : 1)),
+      paletteCommand('guard-demo', 'Fake an approval prompt', ['guard', 'approval', 'demo'], () => activeApi && activeApi.guardDemo()),
       paletteCommand('sense-demo', 'Test spider-sense (fake risky command)', ['danger', 'approval', 'demo'], demoSense),
       paletteCommand('wind', 'Wind on / off', ['sway', 'scroll', 'wind'], () => adjust('wind', 1, CONFIG.wind ? -1 : 1)),
       paletteCommand('peers', 'Visiting between windows on / off', ['window', 'visit', 'friend'], () => adjust('peers', 1, CONFIG.peers ? -1 : 1)),
