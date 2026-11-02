@@ -27,7 +27,7 @@ const CONFIG = {
   size: 1.2, // spider size multiplier
   speed: 0.7, // art pixels per 60 Hz step (walking speed)
   accent: null, // force a colour, e.g. '#ff9f1c'; null = read from theme
-  babies: 0, // small followers trailing the big spider (0-4); off for now, code kept
+  babies: 2, // small followers trailing the big spider (0-4)
   babyScale: 0.42, // baby size relative to the big one
   helpers: 1, // 1 = each running subagent gets a small helper spider that works beside the big one
   helperScale: 0.5, // helper size relative to the big spider
