@@ -25,13 +25,16 @@ hermes plugins enable web-crawler-spider
 
 Or by hand: copy `desktop/plugin.js` to `~/.hermes/desktop-plugins/web-crawler-spider/plugin.js`. Hermes Desktop
 loads it within a few seconds. The first time, a small bubble points you to the spider icon in the status bar: click
-it for the settings panel (sliders for size, speed and body, a colour picker, a switch for every feature, pause,
-nap, reset and a *Demo all* button that shows every trick in half a minute).
+it for the settings panel (sliders for size, speed, body and **baby count**, a colour picker, a switch for every
+feature, pause, nap, reset and a *Demo all* button that shows every trick in half a minute).
 
 ## What it does
 
 - **Roams its own overlay.** Long arched legs, a small box body, a real tetrapod gait, and a thin silk line to the
   spot it is heading for. Colours follow your theme. By default it reads nothing from the app.
+- **Baby spiders.** You can set how many little followers trail the big spider (0–4) with a slider in the settings
+  panel. They roam free around the window and every now and then dash back to the big spider for a hug, curling up
+  beside her when she naps.
 - **Explore mode (opt-in, off by default).** Turn on *Explore the app* in the settings panel and it walks to the
   app's real buttons, links and inputs instead, boxing the one it stands on. This is the only mode that reads the
   page (see the disclosure below).
@@ -47,8 +50,11 @@ nap, reset and a *Demo all* button that shows every trick in half a minute).
   to the **Run** button and taps beside it, and on an error it goes to the error banner.
 - **Spider-sense.** A risky command (`rm`, `sudo`, `git reset --hard`, `curl | sh`, …) in an approval request or
   tool call makes it freeze, stand tall with its front legs up and flash red with a "!".
-
-  ![Spider-sense](docs/spider-sense.png)
+- **Approval guardian.** When Hermes shows an approval, sudo, clarify or secret prompt, the spider can stand
+  directly on top of the button, pulse a red silk web around it and refuse to leave until you respond. Turn it on
+  in the settings panel or with the palette command *Spider: Approval guardian on/off*.
+- **Warning details.** When an error or approval happens, a small bubble under the "!" shows what it actually says
+  (the command, error message or description). Turn it on in the settings panel with *Spider: Warning details on/off*.
 - **Mood colours.** Amber while waiting for you, red on errors, green when a run completes.
 - **Alive.** Flies show up now and then and get hunted, wrapped and eaten. It grooms, stretches, naps in a corner
   web when nothing happens, hops away when you click near it, and now and then dashes after the mouse cursor for
@@ -66,11 +72,12 @@ nap, reset and a *Demo all* button that shows every trick in half a minute).
 ## Commands (Ctrl+K → "Spider: …")
 
 Pause / resume, Bigger, Smaller, Faster, Slower, Bigger body, Smaller body, Silk guide line on/off, Flies on/off,
-Release a fly, Helper spiders on/off, Work web on/off, Attention + spider-sense on/off, Wind on/off, Explore the app on/off, Next colour, Visiting
-between windows on/off, Cursor chase on/off, Freeze in the background on/off, Take a nap, Wake up, Reset size, speed and extras.
+Release a fly, Helper spiders on/off, Baby spiders on/off, Approval guardian on/off, Warning details on/off, Work web on/off,
+Attention + spider-sense on/off, Wind on/off, Explore the app on/off, Next colour, Visiting between windows on/off,
+Cursor chase on/off, Freeze in the background on/off, Take a nap, Wake up, Reset size, speed and extras.
 
 Demos (no real work needed): Show everything, Show a helper spider, Show the work web, Test spider-sense, Show a visiting spider,
-Send my spider to visit another window, Chase my cursor now.
+Send my spider to visit another window, Chase my cursor now, Show a fake approval prompt, Show a fake error warning.
 
 Everything in the settings panel is also available from the palette. Settings are saved in the plugin's own storage and survive restarts.
 
