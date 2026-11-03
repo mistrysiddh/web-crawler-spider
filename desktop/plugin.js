@@ -772,7 +772,7 @@ function startSpider(ctx) {
         if (c.hidden || c.role !== 'main') continue;
         if (Math.hypot(e.clientX - c.body.x, e.clientY - c.body.y) < 60 * c.size) {
           pet.until = performance.now() + 2000;
-          st = c.state;
+          const st = c.state;
           st.hop = Math.max(st.hop, 12 * c.size);
           st.headTwitch = (Math.random() - 0.5) * 0.5;
           st.groom = 60;
@@ -933,6 +933,13 @@ function startSpider(ctx) {
     const st = state;
     const m = moodNow(now);
     st.hop *= 0.9;
+
+    // click-to-pet: happy wiggle for 2 seconds after being clicked
+    if (now < pet.until) {
+      st.hop = Math.max(st.hop, 6 + 6 * Math.sin(now / 60));
+      st.headTwitch = (Math.sin(now / 50) * 0.4);
+      st.groom = Math.max(st.groom, Math.floor(Math.sin(now / 40) * 20 + 20));
+    }
 
     if (st.scare > 0) {
       st.scare--;
