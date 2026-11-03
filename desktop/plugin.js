@@ -1232,6 +1232,20 @@ function startSpider(ctx) {
       st.bob = Math.sin(now / 60) * 0.8;
       return;
     }
+    // cursor scare: baby scurries away from the mouse pointer
+    const cd = Math.hypot(pointer.x - c.body.x, pointer.y - c.body.y);
+    const cscare = c.role === 'baby' ? CONFIG.scareRadius * 0.5 : CONFIG.scareRadius;
+    if (now - pointer.t < 800 && cd < cscare) {
+      const dx = c.body.x - pointer.x;
+      const dy = c.body.y - pointer.y;
+      const cd2 = Math.hypot(dx, dy) || 1;
+      st.fleeTarget = {
+        x: Math.min(Math.max(c.body.x + (dx / cd2) * cscare * 2, 40), window.innerWidth - 40),
+        y: Math.min(Math.max(c.body.y + (dy / cd2) * cscare * 2, 40), window.innerHeight - 40),
+      };
+      st.scare = 40;
+      st.hop = Math.max(st.hop, 8 * c.size);
+    }
     const lead = main.state;
     const gap = Math.hypot(main.body.x - c.body.x, main.body.y - c.body.y);
     // curl up beside a sleeping parent
