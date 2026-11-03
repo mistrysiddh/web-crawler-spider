@@ -67,6 +67,14 @@ feature, pause, nap, reset and a *Demo all* button that shows every trick in hal
   settings panel if you want it to keep going.
 - **Colours and cheers.** Follows your theme, or pick Ember, Moss, Ice, Violet or Rose. After a long run that ends
   well it does a little victory dance.
+- **Click-to-pet.** Click the spider and it does a happy wiggle/dance. Turn off in settings if you prefer it
+  unbothered.
+- **Pomodoro buddy.** Turn on pomodoro and the spider works while you work, curls up for a break, then back to
+  work. Start/stop from the palette.
+- **Ntfy glow.** Add an ntfy topic URL and the spider glows with a pulsing ring when you have unread notifications.
+- **Weather coat.** Add your latitude/longitude and the spider changes colour with the weather: blue for rain,
+  white for snow, purple for storms, grey for clouds.
+- **GitHub PR status.** Add a repo and the spider shows a badge with open PR count and state.
 - It always stays fully inside the window.
 
 ## Commands (Ctrl+K → "Spider: …")
@@ -74,10 +82,12 @@ feature, pause, nap, reset and a *Demo all* button that shows every trick in hal
 Pause / resume, Bigger, Smaller, Faster, Slower, Bigger body, Smaller body, Silk guide line on/off, Flies on/off,
 Release a fly, Helper spiders on/off, Baby spiders on/off, Approval guardian on/off, Warning details on/off, Work web on/off,
 Attention + spider-sense on/off, Wind on/off, Explore the app on/off, Next colour, Visiting between windows on/off,
-Cursor chase on/off, Freeze in the background on/off, Take a nap, Wake up, Reset size, speed and extras.
+Cursor chase on/off, Freeze in the background on/off, Click-to-pet on/off, Pomodoro buddy on/off, Ntfy glow on/off,
+Weather coat on/off, GitHub PR status on/off, Take a nap, Wake up, Reset size, speed and extras.
 
 Demos (no real work needed): Show everything, Show a helper spider, Show the work web, Test spider-sense, Show a visiting spider,
-Send my spider to visit another window, Chase my cursor now, Show a fake approval prompt, Show a fake error warning.
+Send my spider to visit another window, Chase my cursor now, Show a fake approval prompt, Show a fake error warning,
+Start pomodoro, Stop pomodoro.
 
 Everything in the settings panel is also available from the palette. Settings are saved in the plugin's own storage and survive restarts.
 
@@ -95,6 +105,8 @@ Everything in the settings panel is also available from the palette. Settings ar
   approval payloads. That text is matched in memory and thrown away.
 - **Talks to its own other windows** over a same-origin `BroadcastChannel` (`web-crawler-spider/peers`) with tiny
   position-free messages ("hello", "visit", "back", "gone").
+- **Optional external polling** (only when you turn it on in settings): ntfy topic, open-meteo weather forecast,
+  and GitHub pull requests for one configured repo. Each uses plain `fetch` with no auth, cached for minutes.
 - **No network calls, no shell commands, no background processes, no credentials, no telemetry.** It never
   updates itself. Only `@hermes/plugin-sdk` and `react` are imported.
 - It draws on one full-window canvas (`pointer-events: none`, `data-wcs` attribute) plus one outline `div`, and
