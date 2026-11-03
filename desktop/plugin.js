@@ -49,6 +49,7 @@ const CONFIG = {
   web: 1, // 1 = a web grows in the corner while the agent works (a strand per tool call)
   attention: 1, // 1 = it senses risky commands; with explore on it also walks to the button that needs you
   guardian: 1, // 1 = when an approval / sudo / clarify / secret prompt shows, the spider stands on it and won't leave until you respond
+  warningDetail: 1, // 1 = show a small text bubble with what the warning/error actually says
   wind: 1, // 1 = scrolling or moving the window makes the silk sway and the spider cling
   peers: 1, // 1 = spiders in other Hermes windows visit each other
   visitEveryMs: 100000, // average gap between visits when another window is open
@@ -142,6 +143,7 @@ function handleSubagentEvent(t, payload, now) {
 // --- the work web grows with the agent's run; spider-sense reacts to risky commands ---
 const run = { active: false, strands: 0, result: null, resultAt: 0, seen: 0, startedAt: 0, cheer: false };
 const danger = { until: 0, at: 0 };
+const warning = { text: '', type: '', until: 0 }; // last warning/error shown in the detail bubble
 const RISKY =
   /\brm\s+\S|\bsudo\b|\bmkfs\b|\bdd\s+if=|\bchmod\s+(-R|0?777)|\bchown\s+-R|git\s+(reset\s+--hard|push\s+(--force|-f\b)|clean\s+-\w*f|checkout\s+--)|drop\s+(table|database)|\btruncate\b|>\s*\/dev\/sd|\bkill\s+-9|\bshutdown\b|\breboot\b|curl[^|]*\|\s*(ba)?sh|\bdel\s+\/[sq]|\brmdir\b|:\(\)\s*\{|\bdangerous\b|\bdestructive\b/i;
 const WEB_MAX_SEGS = 60;
@@ -246,6 +248,12 @@ function handleGatewayEvent(event) {
   trackRun(t, event.payload, now);
   if (t === 'approval.request' || t === 'sudo.request' || t === 'clarify.request' || t === 'secret.request') {
     mood.waiting = true;
+    if (CONFIG.warningDetail) {
+      const p = event.payload && typeof event.payload === 'object' ? event.payload : {};
+      warning.text = p.message || p.description || p.command || `$(t) requested`;
+      warning.type = t;
+      warning.until = now + 120000;
+    }
     if (CONFIG.guardian) {
       guardEl = findGuardianEl();
       guardUntil = 0; // never auto-release; user must respond
@@ -269,12 +277,25 @@ function handleGatewayEvent(event) {
   } else if (t === 'error') {
     mood.errorUntil = now + 15000;
     mood.workUntil = 0;
+    if (CONFIG.warningDetail) {
+      const p = event.payload && typeof event.payload === 'object' ? event.payload : {};
+      warning.text = p.message || p.error || p.text || String(p.message || p.error || '');
+      warning.type = 'error';
+      warning.until = now + 15000;
+    }
   } else if (t === 'message.complete') {
     mood.waiting = false;
     mood.workUntil = 0;
     const status = event.payload && event.payload.status;
-    if (status === 'error') mood.errorUntil = now + 15000;
-    else if (status !== 'interrupted') mood.doneUntil = now + 5000;
+    if (status === 'error') {
+      mood.errorUntil = now + 15000;
+      if (CONFIG.warningDetail) {
+        const p = event.payload && typeof event.payload === 'object' ? event.payload : {};
+        warning.text = p.message || p.error || 'Agent run ended with an error';
+        warning.type = 'error';
+        warning.until = now + 15000;
+      }
+    } else if (status !== 'interrupted') mood.doneUntil = now + 5000;
   } else if (
     t === 'message.start' || t === 'message.delta' || t === 'tool.start' || t === 'tool.generating' ||
     t === 'reasoning.delta' || t === 'thinking.delta' || t.startsWith('subagent.')
@@ -1978,6 +1999,18 @@ function startSpider(ctx) {
     ctx2d.font = `bold ${22 * size}px sans-serif`;
     ctx2d.textAlign = 'center';
     ctx2d.fillText('!', main.body.x, y);
+    if (CONFIG.warningDetail && warning.text && now < warning.until) {
+      const msg = warning.text.length > 44 ? warning.text.slice(0, 41) + '…' : warning.text;
+      const yy = y + 26 * size;
+      ctx2d.fillStyle = '#10121f';
+      ctx2d.fillRect(main.body.x - ctx2d.measureText(msg).width / 2 - 6 * size, yy - 14 * size, ctx2d.measureText(msg).width + 12 * size, 18 * size);
+      ctx2d.strokeStyle = warning.type === 'error' ? '#ff3b3b' : '#ffb020';
+      ctx2d.lineWidth = 2 * size;
+      ctx2d.strokeRect(main.body.x - ctx2d.measureText(msg).width / 2 - 6 * size, yy - 14 * size, ctx2d.measureText(msg).width + 12 * size, 18 * size);
+      ctx2d.fillStyle = warning.type === 'error' ? '#ff3b3b' : '#ffb020';
+      ctx2d.font = `bold ${12 * size}px sans-serif`;
+      ctx2d.fillText(msg, main.body.x, yy + 4 * size);
+    }
     ctx2d.restore();
   }
 
@@ -2188,6 +2221,7 @@ function startSpider(ctx) {
     wake,
     spawnBug,
     guardDemo,
+    warningDemo,
     spawnHelperDemo,
     spawnGuest: () => spawnGuest(null),
     chase: () => {
@@ -2324,6 +2358,12 @@ function demoSense() {
 function guardDemo() {
   handleGatewayEvent({ type: 'approval.request', payload: { command: 'sudo npm install', description: 'demo' } });
   setTimeout(() => handleGatewayEvent({ type: 'approval.received', payload: {} }), 9000);
+}
+
+/** Fake an error so you can see the warning detail bubble in action. */
+function warningDemo() {
+  handleGatewayEvent({ type: 'error', payload: { message: 'rm -rf ./important_files: permission denied', error: 'EACCES', code: 'EACCES' } });
+  setTimeout(() => handleGatewayEvent({ type: 'message.complete', payload: { status: 'error' } }), 6000);
 }
 
 /** Everything at once, for a first look: a fly, a work web, a helper, a risky command and a visitor. */
@@ -2604,6 +2644,8 @@ const WebCrawlerSpiderPlugin = {
       paletteCommand('attention', 'Attention + spider-sense on / off', ['approval', 'danger', 'attention'], () => adjust('attention', 1, CONFIG.attention ? -1 : 1)),
       paletteCommand('guardian', 'Approval guardian on / off', ['guard', 'approval', 'sudo', 'protect'], () => adjust('guardian', 1, CONFIG.guardian ? -1 : 1)),
       paletteCommand('guard-demo', 'Fake an approval prompt', ['guard', 'approval', 'demo'], () => activeApi && activeApi.guardDemo()),
+      paletteCommand('warning-detail', 'Show warning details on / off', ['warning', 'error', 'detail', 'bubble'], () => adjust('warningDetail', 1, CONFIG.warningDetail ? -1 : 1)),
+      paletteCommand('warning-demo', 'Show a fake error warning', ['warning', 'error', 'demo'], () => activeApi && activeApi.warningDemo()),
       paletteCommand('sense-demo', 'Test spider-sense (fake risky command)', ['danger', 'approval', 'demo'], demoSense),
       paletteCommand('wind', 'Wind on / off', ['sway', 'scroll', 'wind'], () => adjust('wind', 1, CONFIG.wind ? -1 : 1)),
       paletteCommand('peers', 'Visiting between windows on / off', ['window', 'visit', 'friend'], () => adjust('peers', 1, CONFIG.peers ? -1 : 1)),
