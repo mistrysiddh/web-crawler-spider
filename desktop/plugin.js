@@ -2722,7 +2722,8 @@ function togglePanel(anchor) {
     el('button', { 'data-act': 'fly', style: btnStyle(), onclick: () => activeApi && activeApi.spawnBug() }, 'Release a fly'),
     el('button', { 'data-act': 'demo', style: btnStyle(), onclick: () => { closePanel(); demoAll(); } }, 'Demo all'),
     el('button', { 'data-act': 'nap', style: btnStyle(), onclick: () => { closePanel(); if (activeApi) activeApi.nap(); } }, 'Nap'),
-    el('button', { 'data-act': 'reset', style: btnStyle(), onclick: () => { resetSettings(); closePanel(); } }, 'Reset')
+    el('button', { 'data-act': 'reset', style: btnStyle(), onclick: () => { resetSettings(); closePanel(); } }, 'Reset'),
+    el('button', { 'data-act': 'refresh', style: btnStyle(), onclick: () => { closePanel(); restartSpider(); } }, 'Refresh spider')
   );
   panelEl.append(actions);
 
@@ -2884,6 +2885,7 @@ const WebCrawlerSpiderPlugin = {
       paletteCommand('nap', 'Take a nap', ['sleep', 'rest'], () => activeApi && activeApi.nap()),
       paletteCommand('wake', 'Wake up', ['sleep'], () => activeApi && activeApi.wake()),
       paletteCommand('reset', 'Reset size, speed and extras', ['default', 'settings'], resetSettings),
+      paletteCommand('refresh', 'Refresh spider (reload plugin.js)', ['reload', 'refresh', 'restart'], () => restartSpider()),
       paletteCommand('click-pet', 'Click-to-pet on / off', ['pet', 'click', 'dance'], () => adjust('clickPet', 1, CONFIG.clickPet ? -1 : 1)),
       paletteCommand('pomodoro', 'Pomodoro buddy on / off', ['pomodoro', 'timer', 'work', 'break'], () => adjust('pomodoro', 1, CONFIG.pomodoro ? -1 : 1)),
       paletteCommand('pomodoro-start', 'Start pomodoro now', ['pomodoro', 'start', 'timer'], () => {
