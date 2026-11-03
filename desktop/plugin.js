@@ -2387,12 +2387,12 @@ const PANEL_SLIDERS = [
   ['size', 'Size', 0.05],
   ['speed', 'Speed', 0.05],
   ['bodyScale', 'Body', 0.05],
+  ['babies', 'Baby spiders', 1],
 ];
 const PANEL_TOGGLES = [
   ['trail', 'Silk guide line to its next stop'],
   ['bugs', 'Flies to hunt'],
   ['helpers', 'Helper spiders for subagents'],
-  ['babies', 'Baby spiders trailing the big one'],
   ['web', 'Work web (grows with tool calls)'],
   ['explore', 'Explore the app: walk to its buttons and links (reads the page)'],
   ['attention', 'Spider-sense for risky commands (walks to Run if Explore is on)'],
