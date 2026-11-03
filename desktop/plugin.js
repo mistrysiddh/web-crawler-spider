@@ -1141,28 +1141,48 @@ function startSpider(ctx) {
       st.bob = Math.sin(now / 900 + idx) * 0.6;
       return;
     }
-    st.mode = 'walk';
-    st.curl = Math.max(0, st.curl - 0.04);
-    // follow breadcrumbs when the parent is travelling, huddle round it when it stands still
-    let tx;
-    let ty;
-    if (lead.speedNow > 0.2 && leaderHist.length > 20) {
-      const p = leaderHist[Math.max(0, leaderHist.length - 1 - (idx + 1) * 16)];
-      tx = p.x;
-      ty = p.y;
-    } else {
-      const a = (idx / Math.max(1, creatures.length - 1)) * Math.PI * 2 + now / 4000;
-      tx = main.body.x + Math.cos(a) * (60 + idx * 14);
-      ty = main.body.y + Math.sin(a) * (60 + idx * 14);
+    // roam freely; every now and then dash back to the big spider for a hug
+    const roam = st.mode === 'roam' || st.mode === 'walk';
+    if (st.mode !== 'runToParent') {
+      if (Math.random() < 0.0012) {
+        st.mode = 'runToParent';
+        st.target = { x: main.body.x, y: main.body.y };
+      } else if (st.mode === 'roam' && now > st.dwellUntil) {
+        const m = 90;
+        st.target.x = m + Math.random() * (window.innerWidth - m * 2);
+        st.target.y = m + Math.random() * (window.innerHeight - m * 2);
+        st.dwellUntil = now + 1500 + Math.random() * 2500;
+      } else if (st.mode !== 'roam') {
+        st.mode = 'roam';
+        st.dwellUntil = now + 1500 + Math.random() * 2500;
+        const m = 90;
+        st.target.x = m + Math.random() * (window.innerWidth - m * 2);
+        st.target.y = m + Math.random() * (window.innerHeight - m * 2);
+      }
+    }
+    let tx = st.target.x;
+    let ty = st.target.y;
+    // while returning to parent, aim straight at it
+    if (st.mode === 'runToParent') {
+      tx = main.body.x;
+      ty = main.body.y;
     }
     const dist = Math.hypot(tx - c.body.x, ty - c.body.y);
-    const pace = Math.min(1.8, Math.max(0.2, dist / 80));
-    if (walkToward(c, tx, ty, pace, 10)) {
-      st.bob = Math.sin(now / 300 + idx) * 0.8;
-      if (Math.random() < 0.01) st.headTwitch = (Math.random() - 0.5) * 0.4;
+    const pace = Math.min(2.2, Math.max(0.3, dist / 60)) * (st.mode === 'runToParent' ? 1.6 : 1);
+    const arriving = walkToward(c, tx, ty, pace, st.mode === 'runToParent' ? 14 : 10);
+    if (arriving) {
+      if (st.mode === 'runToParent') {
+        st.hop = Math.max(st.hop, 10 * c.size); // little bounce when it reaches the big one
+        st.mode = 'roam';
+        st.dwellUntil = now + 2000 + Math.random() * 3000; // hang out near parent briefly
+      } else {
+        st.dwellUntil = now + 1500 + Math.random() * 2500;
+      }
     } else {
       st.bob = Math.sin(now / (c.stepMs * 0.5)) * 0.6;
+      if (st.mode === 'runToParent' && Math.random() < 0.015) st.headTwitch = (Math.random() - 0.5) * 0.4;
     }
+    st.curl = Math.max(0, st.curl - 0.04);
   }
 
   // ---- helper spiders: one small spider per running subagent ----
