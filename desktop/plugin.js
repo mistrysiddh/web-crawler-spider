@@ -50,6 +50,14 @@ const CONFIG = {
   attention: 1, // 1 = it senses risky commands; with explore on it also walks to the button that needs you
   guardian: 1, // 1 = when an approval / sudo / clarify / secret prompt shows, the spider stands on it and won't leave until you respond
   warningDetail: 1, // 1 = show a small text bubble with what the warning/error actually says
+  clickPet: 1, // 1 = click the spider to make it do a happy wiggle/dance
+  pomodoro: 0, // 1 = pomodoro buddy: spider works while you work, naps on break
+  pomodoroWorkMs: 1500000, // 25 min work
+  pomodoroBreakMs: 300000, // 5 min break
+  ntfyTopic: '', // ntfy topic URL, e.g. https://ntfy.sh/my-topic
+  weatherLat: '', // latitude for weather coat
+  weatherLon: '', // longitude for weather coat
+  githubRepo: '', // repo for PR status, e.g. mistrysiddh/web-crawler-spider
   wind: 1, // 1 = scrolling or moving the window makes the silk sway and the spider cling
   peers: 1, // 1 = spiders in other Hermes windows visit each other
   visitEveryMs: 100000, // average gap between visits when another window is open
@@ -143,7 +151,12 @@ function handleSubagentEvent(t, payload, now) {
 // --- the work web grows with the agent's run; spider-sense reacts to risky commands ---
 const run = { active: false, strands: 0, result: null, resultAt: 0, seen: 0, startedAt: 0, cheer: false };
 const danger = { until: 0, at: 0 };
-const warning = { text: '', type: '', until: 0 }; // last warning/error shown in the detail bubble
+const warning = { text: '', type: '', until: 0 };
+const pet = { until: 0 }; // click-to-pet happy dance timer
+const pomodoro = { phase: 'work', until: 0, startedAt: 0 }; // work | break | idle
+const ntfy = { lastSeen: 0, unread: 0 };
+const weather = { condition: 'clear', temp: null, until: 0 };
+const github = { prState: null, prCount: 0, until: 0 }; // last warning/error shown in the detail bubble
 const RISKY =
   /\brm\s+\S|\bsudo\b|\bmkfs\b|\bdd\s+if=|\bchmod\s+(-R|0?777)|\bchown\s+-R|git\s+(reset\s+--hard|push\s+(--force|-f\b)|clean\s+-\w*f|checkout\s+--)|drop\s+(table|database)|\btruncate\b|>\s*\/dev\/sd|\bkill\s+-9|\bshutdown\b|\breboot\b|curl[^|]*\|\s*(ba)?sh|\bdel\s+\/[sq]|\brmdir\b|:\(\)\s*\{|\bdangerous\b|\bdestructive\b/i;
 const WEB_MAX_SEGS = 60;
@@ -568,6 +581,52 @@ function startSpider(ctx) {
     pal = isLightBackground() ? PALETTES.light : PALETTES.dark;
   }, CONFIG.themeReadMs);
 
+  // external status polling: ntfy, weather, github PR status
+  const extInterval = setInterval(() => {
+    if (suspended) return;
+    // ntfy glow
+    if (CONFIG.ntfyTopic) {
+      fetch(CONFIG.ntfyTopic, { method: 'HEAD', cache: 'no-store' })
+        .then((r) => {
+          const etag = r.headers.get('etag') || r.headers.get('last-modified');
+          if (etag && etag !== ntfy.lastSeen) {
+            ntfy.lastSeen = etag;
+            ntfy.unread += 1;
+            ntfy.unread = Math.min(ntfy.unread, 9);
+          }
+        })
+        .catch(() => {});
+    }
+    // weather coat
+    if (CONFIG.weatherLat && CONFIG.weatherLon && now > weather.until) {
+      fetch(`https://api.open-meteo.com/v1/forecast?latitude=${CONFIG.weatherLat}&longitude=${CONFIG.weatherLon}&current=temperature_2m,weather_code,wind_speed_10m&timezone=auto`)
+        .then((r) => r.json())
+        .then((d) => {
+          if (d.current) {
+            weather.temp = Math.round(d.current.temperature_2m);
+            const code = d.current.weather_code;
+            weather.condition = code === 0 ? 'clear' : code === 1 || code === 2 || code === 3 ? 'cloudy' : code >= 51 && code <= 67 ? 'rain' : code >= 71 && code <= 77 ? 'snow' : code >= 80 && code <= 82 ? 'rain' : code >= 95 ? 'storm' : 'clear';
+            weather.until = performance.now() + 600000; // 10 min
+          }
+        })
+        .catch(() => {});
+    }
+    // github PR status
+    if (CONFIG.githubRepo && now > github.until) {
+      fetch(`https://api.github.com/repos/${CONFIG.githubRepo}/pulls?state=open`, { headers: { Accept: 'application/vnd.github+json' } })
+        .then((r) => r.json())
+        .then((prs) => {
+          if (Array.isArray(prs)) {
+            github.prCount = prs.length;
+            const states = prs.map((p) => p.state === 'open' && p.draft ? 'draft' : p.state);
+            github.prState = states.includes('open') ? 'open' : null;
+            github.until = performance.now() + 300000; // 5 min
+          }
+        })
+        .catch(() => {});
+    }
+  }, 15000);
+
   const prefersReducedMotion =
     window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const stored = ctx && ctx.storage ? ctx.storage.get('wcs:paused') : undefined;
@@ -707,6 +766,20 @@ function startSpider(ctx) {
   }
   function onPointerDown(e) {
     noteActivity();
+    // click-to-pet: happy dance instead of scare
+    if (CONFIG.clickPet) {
+      for (const c of creatures) {
+        if (c.hidden || c.role !== 'main') continue;
+        if (Math.hypot(e.clientX - c.body.x, e.clientY - c.body.y) < 60 * c.size) {
+          pet.until = performance.now() + 2000;
+          st = c.state;
+          st.hop = Math.max(st.hop, 12 * c.size);
+          st.headTwitch = (Math.random() - 0.5) * 0.5;
+          st.groom = 60;
+          return; // pet takes priority over scare
+        }
+      }
+    }
     for (const c of creatures) {
       if (c.hidden || c.role === 'guest') continue;
       if (Math.hypot(e.clientX - c.body.x, e.clientY - c.body.y) < CONFIG.scareRadius * (c.role === 'main' ? 1 : 0.6)) {
@@ -942,6 +1015,27 @@ function startSpider(ctx) {
       const target = st.stretch > 0 ? -0.35 : cling; // stretching: stand tall, legs reach out
       st.curl += (target - st.curl) * (st.curl > 0 ? 0.25 : 0.12);
       if (st.stretch > 0) st.stretch--;
+
+    // pomodoro buddy: works while you work, naps on break
+    if (CONFIG.pomodoro && pomodoro.until > 0 && now < pomodoro.until) {
+      if (pomodoro.phase === 'break' && st.mode !== 'sleep' && st.mode !== 'nest') {
+        st.mode = 'nest';
+        st.dwellUntil = pomodoro.until;
+      }
+      if (pomodoro.phase === 'work' && (st.mode === 'sleep' || st.mode === 'nest')) {
+        st.mode = 'dwell';
+        st.dwellUntil = now + 800;
+      }
+    } else if (CONFIG.pomodoro && pomodoro.until > 0 && now >= pomodoro.until) {
+      // phase flipped
+      pomodoro.phase = pomodoro.phase === 'work' ? 'break' : 'work';
+      pomodoro.until = now + (pomodoro.phase === 'work' ? CONFIG.pomodoroWorkMs : CONFIG.pomodoroBreakMs);
+      if (pomodoro.phase === 'break') {
+        st.mode = 'nest';
+        st.dwellUntil = pomodoro.until;
+        st.curl = Math.min(1, st.curl + 0.02);
+      }
+    }
     }
 
     // a fly: spawn now and then while things are calm, hunt it, wrap it, eat it
@@ -2034,6 +2128,78 @@ function startSpider(ctx) {
     ctx2d.restore();
   }
 
+  // ntfy glow: pulsing ring when there are unread notifications
+  function drawNtyGlow(now) {
+    const r = 34 + Math.sin(now / 100) * 6;
+    ctx2d.save();
+    ctx2d.strokeStyle = '#ffb020';
+    ctx2d.lineWidth = 2;
+    ctx2d.globalAlpha = 0.5 + 0.3 * Math.sin(now / 80);
+    ctx2d.beginPath();
+    ctx2d.arc(main.body.x, main.body.y - 4 * size, r, 0, Math.PI * 2);
+    ctx2d.stroke();
+    ctx2d.fillStyle = '#ffb020';
+    ctx2d.globalAlpha = 0.7;
+    ctx2d.font = `bold ${12 * size}px sans-serif`;
+    ctx2d.textAlign = 'center';
+    ctx2d.fillText(ntfy.unread, main.body.x, main.body.y + 4 * size);
+    ctx2d.restore();
+  }
+
+  // github PR badge: open PR count with state color
+  function drawGitHubBadge(now) {
+    const col = github.prState === 'open' ? '#2ea44f' : '#d73a4a';
+    ctx2d.save();
+    ctx2d.fillStyle = '#10121f';
+    const label = `github: ${github.prState} (${github.prCount})`;
+    ctx2d.font = `bold ${11 * size}px sans-serif`;
+    ctx2d.textAlign = 'center';
+    const w = ctx2d.measureText(label).width + 10 * size;
+    const x = main.body.x - w / 2;
+    const y = main.body.y + 50 * size;
+    ctx2d.fillRect(x, y - 14 * size, w, 18 * size);
+    ctx2d.strokeStyle = col;
+    ctx2d.lineWidth = 2 * size;
+    ctx2d.strokeRect(x, y - 14 * size, w, 18 * size);
+    ctx2d.fillStyle = col;
+    ctx2d.fillText(label, main.body.x, y + 3 * size);
+    ctx2d.restore();
+  }
+
+  // weather coat: tint the spider based on current weather
+  function weatherTint(baseColor) {
+    if (!weather.temp || !weather.condition) return baseColor;
+    const w = weather.condition;
+    if (w === 'rain') return '#4a90e2';
+    if (w === 'snow') return '#e6f3ff';
+    if (w === 'storm') return '#6a4c93';
+    if (w === 'cloudy') return '#8a8a8a';
+    return baseColor;
+  }
+
+  // pomodoro indicator: work = green dot, break = amber dot
+  function drawPomodoro(now) {
+    if (!CONFIG.pomodoro || pomodoro.until <= 0 || now >= pomodoro.until) return;
+    const col = pomodoro.phase === 'work' ? '#2ea44f' : '#ffb020';
+    const label = pomodoro.phase === 'work' ? 'work' : 'break';
+    const mins = Math.ceil((pomodoro.until - now) / 60000);
+    ctx2d.save();
+    ctx2d.fillStyle = '#10121f';
+    const text = `pomodoro: ${label} ${mins}m`;
+    ctx2d.font = `bold ${11 * size}px sans-serif`;
+    ctx2d.textAlign = 'center';
+    const w = ctx2d.measureText(text).width + 10 * size;
+    const x = main.body.x - w / 2;
+    const y = main.body.y + 72 * size;
+    ctx2d.fillRect(x, y - 14 * size, w, 18 * size);
+    ctx2d.strokeStyle = col;
+    ctx2d.lineWidth = 2 * size;
+    ctx2d.strokeRect(x, y - 14 * size, w, 18 * size);
+    ctx2d.fillStyle = col;
+    ctx2d.fillText(text, main.body.x, y + 3 * size);
+    ctx2d.restore();
+  }
+
   function render() {
     const now = performance.now();
     // clear only where the creatures were and are now (legs reach ~70 units, knees ~40 up),
@@ -2084,7 +2250,15 @@ function startSpider(ctx) {
     if (guardEl && guardEl.isConnected && guardPulse > 0) drawGuardianWeb(now);
     // far-to-near so a creature lower on screen overlaps one above it
     const order = creatures.slice().sort((a, b) => a.body.y - b.body.y);
-    for (const c of order) if (!c.hidden) drawCreature(c, c.tint || accentNow);
+    for (const c of order) {
+      if (c.hidden) continue;
+      const col = c.role === 'main' && CONFIG.weatherLat && CONFIG.weatherLon ? weatherTint(c.tint || accentNow) : c.tint || accentNow;
+      drawCreature(c, col);
+    }
+    // click-to-pet happy wiggle is handled inside drawCreature via state.hop/groom
+    if (CONFIG.ntfyTopic && ntfy.unread > 0 && !main.hidden) drawNtyGlow(now);
+    if (CONFIG.githubRepo && github.prState && !main.hidden) drawGitHubBadge(now);
+    if (CONFIG.pomodoro) drawPomodoro(now);
     if (CONFIG.attention && now < danger.until && !main.hidden) drawAlert(now);
   }
   let guide = null;
@@ -2297,8 +2471,14 @@ const SETTING_LIMITS = {
   background: [0, 1],
   explore: [0, 1],
   skin: [0, SKINS.length - 1],
+  clickPet: [0, 1],
+  pomodoro: [0, 1],
+  ntfyTopic: [0, 1],
+  weatherLat: [0, 1],
+  weatherLon: [0, 1],
+  githubRepo: [0, 1],
 };
-const DEFAULTS = { size: CONFIG.size, speed: CONFIG.speed, bodyScale: CONFIG.bodyScale, trail: CONFIG.trail, bugs: CONFIG.bugs, helpers: CONFIG.helpers, babies: CONFIG.babies, web: CONFIG.web, attention: CONFIG.attention, wind: CONFIG.wind, peers: CONFIG.peers, chase: CONFIG.chase, background: CONFIG.background, explore: CONFIG.explore, skin: CONFIG.skin };
+const DEFAULTS = { size: CONFIG.size, speed: CONFIG.speed, bodyScale: CONFIG.bodyScale, trail: CONFIG.trail, bugs: CONFIG.bugs, helpers: CONFIG.helpers, babies: CONFIG.babies, web: CONFIG.web, attention: CONFIG.attention, wind: CONFIG.wind, peers: CONFIG.peers, chase: CONFIG.chase, background: CONFIG.background, explore: CONFIG.explore, skin: CONFIG.skin, clickPet: CONFIG.clickPet, pomodoro: CONFIG.pomodoro, ntfyTopic: CONFIG.ntfyTopic, weatherLat: CONFIG.weatherLat, weatherLon: CONFIG.weatherLon, githubRepo: CONFIG.githubRepo };
 
 let chipSetPaused = null;
 let activeApi = null;
@@ -2683,6 +2863,30 @@ const WebCrawlerSpiderPlugin = {
       paletteCommand('nap', 'Take a nap', ['sleep', 'rest'], () => activeApi && activeApi.nap()),
       paletteCommand('wake', 'Wake up', ['sleep'], () => activeApi && activeApi.wake()),
       paletteCommand('reset', 'Reset size, speed and extras', ['default', 'settings'], resetSettings),
+      paletteCommand('click-pet', 'Click-to-pet on / off', ['pet', 'click', 'dance'], () => adjust('clickPet', 1, CONFIG.clickPet ? -1 : 1)),
+      paletteCommand('pomodoro', 'Pomodoro buddy on / off', ['pomodoro', 'timer', 'work', 'break'], () => adjust('pomodoro', 1, CONFIG.pomodoro ? -1 : 1)),
+      paletteCommand('pomodoro-start', 'Start pomodoro now', ['pomodoro', 'start', 'timer'], () => {
+        pomodoro.phase = 'work';
+        pomodoro.until = performance.now() + CONFIG.pomodoroWorkMs;
+        pomodoro.startedAt = performance.now();
+      }),
+      paletteCommand('pomodoro-stop', 'Stop pomodoro', ['pomodoro', 'stop', 'timer'], () => {
+        pomodoro.until = 0;
+      }),
+      paletteCommand('ntfy', 'Ntfy glow on / off', ['ntfy', 'notification', 'alert'], () => adjust('ntfyTopic', 1, CONFIG.ntfyTopic ? -1 : 1)),
+      paletteCommand('weather', 'Weather coat on / off', ['weather', 'coat', 'rain', 'snow'], () => {
+        if (CONFIG.weatherLat && CONFIG.weatherLon) {
+          CONFIG.weatherLat = '';
+          CONFIG.weatherLon = '';
+        } else {
+          CONFIG.weatherLat = '28.6139';
+          CONFIG.weatherLon = '77.2090'; // Delhi default
+        }
+      }),
+      paletteCommand('github', 'GitHub PR status on / off', ['github', 'pr', 'status'], () => {
+        if (CONFIG.githubRepo) CONFIG.githubRepo = '';
+        else CONFIG.githubRepo = 'mistrysiddh/web-crawler-spider';
+      }),
     ]);
   },
 };
