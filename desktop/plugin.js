@@ -2268,6 +2268,7 @@ const SETTING_LIMITS = {
   trail: [0, 1],
   bugs: [0, 1],
   helpers: [0, 1],
+  babies: [0, 4],
   web: [0, 1],
   attention: [0, 1],
   wind: [0, 1],
@@ -2277,7 +2278,7 @@ const SETTING_LIMITS = {
   explore: [0, 1],
   skin: [0, SKINS.length - 1],
 };
-const DEFAULTS = { size: CONFIG.size, speed: CONFIG.speed, bodyScale: CONFIG.bodyScale, trail: CONFIG.trail, bugs: CONFIG.bugs, helpers: CONFIG.helpers, web: CONFIG.web, attention: CONFIG.attention, wind: CONFIG.wind, peers: CONFIG.peers, chase: CONFIG.chase, background: CONFIG.background, explore: CONFIG.explore, skin: CONFIG.skin };
+const DEFAULTS = { size: CONFIG.size, speed: CONFIG.speed, bodyScale: CONFIG.bodyScale, trail: CONFIG.trail, bugs: CONFIG.bugs, helpers: CONFIG.helpers, babies: CONFIG.babies, web: CONFIG.web, attention: CONFIG.attention, wind: CONFIG.wind, peers: CONFIG.peers, chase: CONFIG.chase, background: CONFIG.background, explore: CONFIG.explore, skin: CONFIG.skin };
 
 let chipSetPaused = null;
 let activeApi = null;
@@ -2391,6 +2392,7 @@ const PANEL_TOGGLES = [
   ['trail', 'Silk guide line to its next stop'],
   ['bugs', 'Flies to hunt'],
   ['helpers', 'Helper spiders for subagents'],
+  ['babies', 'Baby spiders trailing the big one'],
   ['web', 'Work web (grows with tool calls)'],
   ['explore', 'Explore the app: walk to its buttons and links (reads the page)'],
   ['attention', 'Spider-sense for risky commands (walks to Run if Explore is on)'],
@@ -2638,6 +2640,7 @@ const WebCrawlerSpiderPlugin = {
       paletteCommand('bugs', 'Flies on / off', ['bug', 'hunt', 'fly'], () => adjust('bugs', 1, CONFIG.bugs ? -1 : 1)),
       paletteCommand('bug-now', 'Release a fly', ['bug', 'hunt', 'fly'], () => activeApi && activeApi.spawnBug()),
       paletteCommand('helpers', 'Helper spiders on / off', ['subagent', 'helper', 'agent'], () => adjust('helpers', 1, CONFIG.helpers ? -1 : 1)),
+      paletteCommand('babies', 'Baby spiders on / off', ['baby', 'babies', 'offspring'], () => adjust('babies', 1, CONFIG.babies > 0 ? -CONFIG.babies : 2)),
       paletteCommand('helper-demo', 'Show a helper spider (10 s demo)', ['subagent', 'helper', 'demo'], demoHelper),
       paletteCommand('web', 'Work web on / off', ['progress', 'tool', 'web'], () => adjust('web', 1, CONFIG.web ? -1 : 1)),
       paletteCommand('web-demo', 'Show the work web (9 s demo)', ['progress', 'web', 'demo'], demoWeb),
